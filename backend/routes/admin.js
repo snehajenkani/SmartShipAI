@@ -29,7 +29,8 @@ function readExcelHeaders(buffer) {
       if (nonEmpty.length > bestMaxNonEmpty) {
         bestMaxNonEmpty = nonEmpty.length;
         bestHeaderRowIndex = i;
-        bestHeaders = row.map((cell) => String(cell || "").trim()).filter(Boolean);
+        // IMPORTANT: keep index alignment with `rows` — do NOT filter out blanks
+        bestHeaders = row.map((cell) => String(cell || "").trim());
         bestRows = rows;
       }
     }
@@ -39,33 +40,56 @@ function readExcelHeaders(buffer) {
 }
 
 // ---------------------------------------------------------------------------
+// HELPER: compute readyForUpload consistently
+// ---------------------------------------------------------------------------
+function computeReadyForUpload(customer) {
+  const hasMapping = !!(
+    customer.loaderMapping?.trackingIdColumn &&
+    (customer.loaderMapping?.routeIdColumn || customer.loaderMapping?.routeNameColumn)
+  );
+  return customer.extractionMode === "direct"
+    ? hasMapping
+    : hasMapping && customer.masterData?.entries?.length > 0;
+}
+
+// ---------------------------------------------------------------------------
 // CUSTOMERS — CRUD
 // ---------------------------------------------------------------------------
 
 router.get("/customers", protect, requireRole("admin"), async (req, res) => {
   try {
     const customers = await Customer.find().sort({ displayName: 1 });
-    const result = customers.map((c) => ({
-      id: c._id,
-      name: c.name,
-      displayName: c.displayName,
-      extractionMode: c.extractionMode,
-      hasMasterData: c.masterData?.entries?.length > 0,
-      masterDataCount: c.masterData?.entries?.length || 0,
-      masterDataFile: c.masterData?.fileName || null,
-      masterDataUploadedAt: c.masterData?.uploadedAt || null,
-      hasLoaderMapping: !!(c.loaderMapping?.trackingIdColumn && (
-        c.loaderMapping?.routeIdColumn || c.loaderMapping?.routeNameColumn
-      )),
-      loaderMapping: c.loaderMapping?.trackingIdColumn ? {
-        trackingIdColumn: c.loaderMapping.trackingIdColumn,
-        routeIdColumn: c.loaderMapping.routeIdColumn,
-        routeNameColumn: c.loaderMapping.routeNameColumn,
-        sampleFileName: c.loaderMapping.sampleFileName,
-        setAt: c.loaderMapping.setAt,
-      } : null,
-      createdAt: c.createdAt,
-    }));
+    const result = customers.map((c) => {
+      const hasMapping = !!(
+        c.loaderMapping?.trackingIdColumn &&
+        (c.loaderMapping?.routeIdColumn || c.loaderMapping?.routeNameColumn)
+      );
+      const readyForUpload = c.extractionMode === "direct"
+        ? hasMapping
+        : hasMapping && c.masterData?.entries?.length > 0;
+
+      return {
+        id: c._id,
+        name: c.name,
+        displayName: c.displayName,
+        extractionMode: c.extractionMode,
+        readyForUpload,
+        hasMasterData: c.masterData?.entries?.length > 0,
+        masterDataCount: c.masterData?.entries?.length || 0,
+        masterDataFile: c.masterData?.fileName || null,
+        masterDataUploadedAt: c.masterData?.uploadedAt || null,
+        hasLoaderMapping: hasMapping,
+        loaderMapping: c.loaderMapping?.trackingIdColumn ? {
+          trackingIdColumn: c.loaderMapping.trackingIdColumn,
+          routeIdColumn: c.loaderMapping.routeIdColumn,
+          routeNameColumn: c.loaderMapping.routeNameColumn,
+          addressColumn: c.loaderMapping.addressColumn || "",
+          sampleFileName: c.loaderMapping.sampleFileName,
+          setAt: c.loaderMapping.setAt,
+        } : null,
+        createdAt: c.createdAt,
+      };
+    });
     res.json(result);
   } catch (err) {
     console.error(err);
@@ -270,7 +294,7 @@ router.get("/customers/:customerId/master-data", protect, requireRole("admin"), 
 });
 
 // ---------------------------------------------------------------------------
-// MASTER DATA DOWNLOAD — generates Excel from stored entries
+// MASTER DATA DOWNLOAD
 // ---------------------------------------------------------------------------
 router.get("/customers/:customerId/master-data/download", protect, requireRole("admin"), async (req, res) => {
   try {
@@ -336,7 +360,7 @@ router.post("/customers/:customerId/loader-mapping", protect, requireRole("admin
       return res.status(400).json({ message: "No sample file uploaded" });
 
     const { headers } = readExcelHeaders(req.file.buffer);
-    const { trackingIdColumn, routeIdColumn, routeNameColumn } = req.body;
+    const { trackingIdColumn, routeIdColumn, routeNameColumn, addressColumn } = req.body;
 
     if (!trackingIdColumn)
       return res.status(400).json({ message: "trackingIdColumn is required" });
@@ -348,8 +372,12 @@ router.post("/customers/:customerId/loader-mapping", protect, requireRole("admin
         return res.status(400).json({ message: "Selected columns were not found in the sample file" });
 
       customer.loaderMapping = {
-        trackingIdColumn, routeIdColumn, routeNameColumn: "",
-        sampleFileName: req.file.originalname, setAt: new Date(),
+        trackingIdColumn,
+        routeIdColumn,
+        routeNameColumn: "",
+        addressColumn: addressColumn || "",
+        sampleFileName: req.file.originalname,
+        setAt: new Date(),
       };
     } else {
       if (!routeNameColumn)
@@ -358,17 +386,23 @@ router.post("/customers/:customerId/loader-mapping", protect, requireRole("admin
         return res.status(400).json({ message: "Selected columns were not found in the sample file" });
 
       customer.loaderMapping = {
-        trackingIdColumn, routeIdColumn: "", routeNameColumn,
-        sampleFileName: req.file.originalname, setAt: new Date(),
+        trackingIdColumn,
+        routeIdColumn: "",
+        routeNameColumn,
+        addressColumn: addressColumn || "",
+        sampleFileName: req.file.originalname,
+        setAt: new Date(),
       };
     }
 
+    customer.markModified("loaderMapping");
     await customer.save();
     res.json({
       message: `Loader Excel format saved for "${customer.displayName}".`,
       trackingIdColumn,
       routeIdColumn: customer.loaderMapping.routeIdColumn,
       routeNameColumn: customer.loaderMapping.routeNameColumn,
+      addressColumn: customer.loaderMapping.addressColumn,
       extractionMode: customer.extractionMode,
     });
   } catch (err) {
@@ -393,6 +427,7 @@ router.get("/customers/:customerId/loader-mapping", protect, requireRole("admin"
       trackingIdColumn: customer.loaderMapping.trackingIdColumn,
       routeIdColumn: customer.loaderMapping.routeIdColumn,
       routeNameColumn: customer.loaderMapping.routeNameColumn,
+      addressColumn: customer.loaderMapping.addressColumn || "",
       sampleFileName: customer.loaderMapping.sampleFileName,
       setAt: customer.loaderMapping.setAt,
     });
