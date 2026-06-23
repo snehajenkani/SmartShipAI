@@ -10,7 +10,13 @@ const scannerRoutes = require("./routes/scanner");
 const app = express();
 
 // Middleware
-app.use(cors());
+app.use(cors({
+  origin: [
+    "https://smart-ship-ai-1xjq.vercel.app",
+    "http://localhost:5173"
+  ],
+  credentials: true
+}));
 app.use(express.json());
 
 // Routes
