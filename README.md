@@ -44,7 +44,7 @@ SmartShipAI/
 ## 1. Backend setup
 
 ```bash
-cd "C:\Users\premk\OneDrive\Desktop\SmartShip AI\backend"
+cd "C:\Users\Sneha\SmartShipAI"
 npm install
 ```
 
