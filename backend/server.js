@@ -2,12 +2,15 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const bcrypt = require("bcryptjs");
+const path = require("path");
 const connectDB = require("./config/db");
 const User = require("./models/User");
 
-const authRoutes = require("./routes/auth");
-const adminRoutes = require("./routes/admin");
+const authRoutes    = require("./routes/auth");
+const adminRoutes   = require("./routes/admin");
 const scannerRoutes = require("./routes/scanner");
+const routingRoutes = require("./routes/routing");
+const trackRoutes   = require("./routes/track"); // ✅ Public tracking route
 
 const app = express();
 
@@ -15,16 +18,25 @@ const app = express();
 app.use(cors({
   origin: [
     "https://smart-ship-ai-1xjq.vercel.app",
-    "http://localhost:5173"
+    "http://localhost:5173",
+    "https://thesmartship.com/",       // ✅ Replace with actual company domain
+    "https://www.thesmartship.com/"    // ✅ Replace with actual company domain
   ],
   credentials: true
 }));
 app.use(express.json());
 
-// Routes
-app.use("/api/auth", authRoutes);
-app.use("/api/admin", adminRoutes);
+// ✅ Serve widget.js as a static file (company pastes one <script> tag)
+app.use(express.static(path.join(__dirname, "public")));
+
+// ✅ Public routes - NO auth middleware (must be before protected routes)
+app.use("/api/public", trackRoutes);
+
+// Protected Routes
+app.use("/api/auth",    authRoutes);
+app.use("/api/admin",   adminRoutes);
 app.use("/api/scanner", scannerRoutes);
+app.use("/api/routing", routingRoutes);
 
 // Health check
 app.get("/api/health", (req, res) => {
