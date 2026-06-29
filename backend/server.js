@@ -27,8 +27,9 @@ app.use(cors({
 app.use(express.json());
 
 // ✅ Serve widget.js as a static file (company pastes one <script> tag)
-app.use(express.static(path.join(__dirname, "public")));
-
+app.get("/widget.js", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "widget.js"));
+});
 // ✅ Public routes - NO auth middleware (must be before protected routes)
 app.use("/api/public", trackRoutes);
 
