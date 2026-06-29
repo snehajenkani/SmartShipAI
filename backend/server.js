@@ -19,8 +19,8 @@ app.use(cors({
   origin: [
     "https://smart-ship-ai-1xjq.vercel.app",
     "http://localhost:5173",
-    "https://thesmartship.com/",       // ✅ Replace with actual company domain
-    "https://www.thesmartship.com/"    // ✅ Replace with actual company domain
+    "https://thesmartship.com",       // ✅ Replace with actual company domain
+    "https://www.thesmartship.com"    // ✅ Replace with actual company domain
   ],
   credentials: true
 }));
