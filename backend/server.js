@@ -18,18 +18,22 @@ const app = express();
 app.use(cors({
   origin: [
     "https://smart-ship-ai-1xjq.vercel.app",
+    "https://smartship-ai.vercel.app",
+    "https://smart-ship-ai-one.vercel.app",
     "http://localhost:5173",
-    "https://thesmartship.com",       // ✅ Replace with actual company domain
-    "https://www.thesmartship.com"    // ✅ Replace with actual company domain
+    "https://thesmartship.com",
+    "https://www.thesmartship.com"
   ],
   credentials: true
 }));
 app.use(express.json());
 
-// ✅ Serve widget.js as a static file (company pastes one <script> tag)
+// ✅ Serve widget.js directly as a route (Render-compatible)
 app.get("/widget.js", (req, res) => {
+  res.setHeader("Content-Type", "application/javascript");
   res.sendFile(path.join(__dirname, "public", "widget.js"));
 });
+
 // ✅ Public routes - NO auth middleware (must be before protected routes)
 app.use("/api/public", trackRoutes);
 

@@ -1,5 +1,5 @@
 (function () {
-  const API_BASE = "https://smart-ship-ai-1xjq.vercel.app/api/public";
+  const API_BASE = "https://smartshipai-2.onrender.com/api/public";
 
   // Inject styles
   const style = document.createElement("style");
