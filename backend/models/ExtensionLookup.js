@@ -2,13 +2,15 @@ const mongoose = require("mongoose");
 
 const lookupEntrySchema = new mongoose.Schema(
   {
-    storeCode: {
+    searchText: {
+      // The raw "Location" cell, e.g. "S0918 - MGC - NERADIGONDA"
+      // Staff can type the code, the place name, or any substring of this.
       type: String,
       trim: true,
-      uppercase: true,
       required: true,
     },
     routeName: {
+      // The "Branch Area" value to return, e.g. "Bhainsa"
       type: String,
       trim: true,
       required: true,
@@ -28,8 +30,8 @@ const extensionLookupSchema = new mongoose.Schema(
     entries: [lookupEntrySchema],
 
     mapping: {
-      storeCodeColumn: String,
-      routeNameColumn: String,
+      searchColumn: String,    // e.g. "Location"
+      routeNameColumn: String, // e.g. "Branch Area"
     },
 
     fileName: String,

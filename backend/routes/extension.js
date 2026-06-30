@@ -10,7 +10,6 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 // ---------------------------------------------------------------------------
 // HELPER: reads an Excel buffer → { headers, headerRowIndex, rows }
-// (same logic as routing.js, kept local to avoid cross-file coupling)
 // ---------------------------------------------------------------------------
 function readExcelHeaders(buffer) {
   const workbook = XLSX.read(buffer, { type: "buffer" });
@@ -64,7 +63,7 @@ router.post(
 // CUSTOMER LOOKUP DATA — persistent, reusable across sessions
 // ===========================================================================
 
-// GET /api/extension/customers — list customers with extension-lookup readiness info
+// GET /api/extension/customers
 router.get("/customers", protect, requireRole("admin"), async (req, res) => {
   try {
     const customers = await Customer.find().sort({ displayName: 1 });
@@ -90,7 +89,7 @@ router.get("/customers", protect, requireRole("admin"), async (req, res) => {
   }
 });
 
-// GET /api/extension/customers/:customerId/lookup — fetch saved lookup data status
+// GET /api/extension/customers/:customerId/lookup
 router.get("/customers/:customerId/lookup", protect, requireRole("admin"), async (req, res) => {
   try {
     const lookup = await ExtensionLookup.findOne({ customer: req.params.customerId });
@@ -128,22 +127,22 @@ router.post(
       if (!customer) return res.status(404).json({ message: "Customer not found" });
       if (!req.file) return res.status(400).json({ message: "No file uploaded" });
 
-      const { storeCodeColumn, routeNameColumn } = req.body;
-      if (!storeCodeColumn || !routeNameColumn)
-        return res.status(400).json({ message: "storeCodeColumn and routeNameColumn are required" });
+      const { searchColumn, routeNameColumn } = req.body;
+      if (!searchColumn || !routeNameColumn)
+        return res.status(400).json({ message: "searchColumn and routeNameColumn are required" });
 
       const { headers, headerRowIndex, rows } = readExcelHeaders(req.file.buffer);
-      const storeCodeCol = findColIdx(headers, storeCodeColumn);
-      const routeNameCol = findColIdx(headers, routeNameColumn);
-      if (storeCodeCol === -1) return res.status(400).json({ message: `Column "${storeCodeColumn}" not found` });
+      const searchCol     = findColIdx(headers, searchColumn);
+      const routeNameCol  = findColIdx(headers, routeNameColumn);
+      if (searchCol    === -1) return res.status(400).json({ message: `Column "${searchColumn}" not found` });
       if (routeNameCol === -1) return res.status(400).json({ message: `Column "${routeNameColumn}" not found` });
 
       const entries = [];
       for (let i = headerRowIndex + 1; i < rows.length; i++) {
-        const row       = rows[i];
-        const storeCode = String(row[storeCodeCol] || "").trim();
-        const routeName = String(row[routeNameCol] || "").trim();
-        if (storeCode && routeName) entries.push({ storeCode, routeName });
+        const row        = rows[i];
+        const searchText = String(row[searchCol]    || "").trim();
+        const routeName  = String(row[routeNameCol] || "").trim();
+        if (searchText && routeName) entries.push({ searchText, routeName });
       }
       if (entries.length === 0)
         return res.status(400).json({ message: "No valid rows found in this file" });
@@ -151,7 +150,7 @@ router.post(
       const update = {
         customer: customer._id,
         entries,
-        mapping: { storeCodeColumn, routeNameColumn },
+        mapping: { searchColumn, routeNameColumn },
         fileName: req.file.originalname,
         uploadedBy: req.user.id,
         uploadedAt: new Date(),
@@ -175,7 +174,7 @@ router.post(
   }
 );
 
-// DELETE /api/extension/customers/:customerId/lookup — clear lookup data
+// DELETE /api/extension/customers/:customerId/lookup
 router.delete("/customers/:customerId/lookup", protect, requireRole("admin"), async (req, res) => {
   try {
     await ExtensionLookup.findOneAndDelete({ customer: req.params.customerId });
