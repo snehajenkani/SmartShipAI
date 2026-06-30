@@ -44,6 +44,39 @@ const customerSchema = new mongoose.Schema(
       uploadedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     },
 
+    // Persistent Routing master data (separate from scanning masterData above)
+    routingMaster: {
+      addressEntries: [
+        {
+          routeName: { type: String, trim: true },
+          address:   { type: String, trim: true },
+          _id: false,
+        },
+      ],
+      addressMapping: {
+        routeNameColumn: { type: String, trim: true },
+        addressColumn:   { type: String, trim: true },
+      },
+      addressFileName:   { type: String },
+      addressUploadedAt: { type: Date },
+
+      pincodeEntries: [
+        {
+          routeName: { type: String, trim: true },
+          pincode:   { type: String, trim: true },
+          _id: false,
+        },
+      ],
+      pincodeMapping: {
+        routeNameColumn: { type: String, trim: true },
+        pincodeColumn:   { type: String, trim: true },
+      },
+      pincodeFileName:   { type: String },
+      pincodeUploadedAt: { type: Date },
+
+      uploadedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    },
+
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",

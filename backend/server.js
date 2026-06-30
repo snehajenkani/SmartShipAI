@@ -6,11 +6,12 @@ const path = require("path");
 const connectDB = require("./config/db");
 const User = require("./models/User");
 
-const authRoutes    = require("./routes/auth");
-const adminRoutes   = require("./routes/admin");
-const scannerRoutes = require("./routes/scanner");
-const routingRoutes = require("./routes/routing");
-const trackRoutes   = require("./routes/track"); // ✅ Public tracking route
+const authRoutes      = require("./routes/auth");
+const adminRoutes     = require("./routes/admin");
+const scannerRoutes   = require("./routes/scanner");
+const routingRoutes   = require("./routes/routing");
+const trackRoutes     = require("./routes/track");     // ✅ Public tracking + extension lookup
+const extensionRoutes = require("./routes/extension");  // ✅ Admin extension lookup management
 
 const app = express();
 
@@ -38,10 +39,11 @@ app.get("/widget.js", (req, res) => {
 app.use("/api/public", trackRoutes);
 
 // Protected Routes
-app.use("/api/auth",    authRoutes);
-app.use("/api/admin",   adminRoutes);
-app.use("/api/scanner", scannerRoutes);
-app.use("/api/routing", routingRoutes);
+app.use("/api/auth",      authRoutes);
+app.use("/api/admin",     adminRoutes);
+app.use("/api/scanner",   scannerRoutes);
+app.use("/api/routing",   routingRoutes);
+app.use("/api/extension", extensionRoutes);
 
 // Health check
 app.get("/api/health", (req, res) => {
