@@ -7,6 +7,8 @@ import CustomersPage from "./pages/CustomersPage.jsx";
 import ClientConfigPage from "./pages/ClientConfigPage.jsx";
 import VehicleDispatchPage from "./pages/VehicleDispatchPage.jsx";
 import Scanner from "./pages/Scanner.jsx";
+import RoutingPage from "./pages/RoutingPage.jsx";
+import ExtensionPage from "./pages/ExtensionPage.jsx";
 
 const RootRedirect = () => {
   const { auth } = useAuth();
@@ -38,6 +40,18 @@ const App = () => {
           <Route path="/admin/vehicle" element={
             <ProtectedRoute allowedRoles={["admin"]}>
               <VehicleDispatchPage />
+            </ProtectedRoute>
+          } />
+
+          <Route path="/routing" element={
+            <ProtectedRoute allowedRoles={["admin"]}>
+              <RoutingPage />
+            </ProtectedRoute>
+          } />
+
+          <Route path="/extension" element={
+            <ProtectedRoute allowedRoles={["admin"]}>
+              <ExtensionPage />
             </ProtectedRoute>
           } />
 

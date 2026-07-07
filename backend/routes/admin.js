@@ -72,6 +72,7 @@ router.get("/customers", protect, requireRole("admin"), async (req, res) => {
         id: c._id,
         name: c.name,
         displayName: c.displayName,
+        customerNumber: c.customerNumber || "",
         extractionMode: c.extractionMode,
         readyForUpload,
         hasMasterData: c.masterData?.entries?.length > 0,
@@ -84,6 +85,8 @@ router.get("/customers", protect, requireRole("admin"), async (req, res) => {
           routeIdColumn: c.loaderMapping.routeIdColumn,
           routeNameColumn: c.loaderMapping.routeNameColumn,
           addressColumn: c.loaderMapping.addressColumn || "",
+          customerNameColumn: c.loaderMapping.customerNameColumn || "",
+          customerNumberColumn: c.loaderMapping.customerNumberColumn || "",
           sampleFileName: c.loaderMapping.sampleFileName,
           setAt: c.loaderMapping.setAt,
         } : null,
@@ -128,7 +131,7 @@ router.post("/customers", protect, requireRole("admin"), async (req, res) => {
 
 router.patch("/customers/:customerId", protect, requireRole("admin"), async (req, res) => {
   try {
-    const { displayName } = req.body;
+    const { displayName, customerNumber } = req.body;
     if (!displayName)
       return res.status(400).json({ message: "displayName is required" });
 
@@ -137,8 +140,13 @@ router.patch("/customers/:customerId", protect, requireRole("admin"), async (req
       return res.status(404).json({ message: "Customer not found" });
 
     customer.displayName = displayName.trim();
+    if (customerNumber !== undefined) customer.customerNumber = customerNumber.trim();
     await customer.save();
-    res.json({ message: "Customer updated successfully", displayName: customer.displayName });
+    res.json({
+      message: "Customer updated successfully",
+      displayName: customer.displayName,
+      customerNumber: customer.customerNumber,
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Server error while updating customer" });
@@ -360,7 +368,7 @@ router.post("/customers/:customerId/loader-mapping", protect, requireRole("admin
       return res.status(400).json({ message: "No sample file uploaded" });
 
     const { headers } = readExcelHeaders(req.file.buffer);
-    const { trackingIdColumn, routeIdColumn, routeNameColumn, addressColumn } = req.body;
+    const { trackingIdColumn, routeIdColumn, routeNameColumn, addressColumn, customerNameColumn, customerNumberColumn } = req.body;
 
     if (!trackingIdColumn)
       return res.status(400).json({ message: "trackingIdColumn is required" });
@@ -376,6 +384,8 @@ router.post("/customers/:customerId/loader-mapping", protect, requireRole("admin
         routeIdColumn,
         routeNameColumn: "",
         addressColumn: addressColumn || "",
+        customerNameColumn: customerNameColumn || "",
+        customerNumberColumn: customerNumberColumn || "",
         sampleFileName: req.file.originalname,
         setAt: new Date(),
       };
@@ -390,6 +400,8 @@ router.post("/customers/:customerId/loader-mapping", protect, requireRole("admin
         routeIdColumn: "",
         routeNameColumn,
         addressColumn: addressColumn || "",
+        customerNameColumn: customerNameColumn || "",
+        customerNumberColumn: customerNumberColumn || "",
         sampleFileName: req.file.originalname,
         setAt: new Date(),
       };
@@ -403,6 +415,8 @@ router.post("/customers/:customerId/loader-mapping", protect, requireRole("admin
       routeIdColumn: customer.loaderMapping.routeIdColumn,
       routeNameColumn: customer.loaderMapping.routeNameColumn,
       addressColumn: customer.loaderMapping.addressColumn,
+      customerNameColumn: customer.loaderMapping.customerNameColumn,
+      customerNumberColumn: customer.loaderMapping.customerNumberColumn,
       extractionMode: customer.extractionMode,
     });
   } catch (err) {
@@ -428,6 +442,8 @@ router.get("/customers/:customerId/loader-mapping", protect, requireRole("admin"
       routeIdColumn: customer.loaderMapping.routeIdColumn,
       routeNameColumn: customer.loaderMapping.routeNameColumn,
       addressColumn: customer.loaderMapping.addressColumn || "",
+      customerNameColumn: customer.loaderMapping.customerNameColumn || "",
+      customerNumberColumn: customer.loaderMapping.customerNumberColumn || "",
       sampleFileName: customer.loaderMapping.sampleFileName,
       setAt: customer.loaderMapping.setAt,
     });

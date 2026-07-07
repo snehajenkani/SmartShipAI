@@ -64,6 +64,8 @@ function parseEntriesFromBuffer(buffer, customer) {
 
   const entries = [];
   const addressColIdx = findColIdx(headers, customer.loaderMapping?.addressColumn);
+  const customerNameColIdx = findColIdx(headers, customer.loaderMapping?.customerNameColumn);
+  const customerNumberColIdx = findColIdx(headers, customer.loaderMapping?.customerNumberColumn);
 
   if (customer.extractionMode === "route-lookup") {
     const routeIdCol = findColIdx(headers, customer.loaderMapping.routeIdColumn);
@@ -74,7 +76,9 @@ function parseEntriesFromBuffer(buffer, customer) {
       const trackingId = String(row[trackingIdCol] || "").trim().toUpperCase();
       const routeId = String(row[routeIdCol] || "").trim().toUpperCase();
       const address = addressColIdx !== -1 ? String(row[addressColIdx] || "").trim() : "";
-      if (trackingId && routeId) entries.push({ trackingId, routeId, routeName: "", address });
+      const customerName = customerNameColIdx !== -1 ? String(row[customerNameColIdx] || "").trim() : "";
+      const customerNumber = customerNumberColIdx !== -1 ? String(row[customerNumberColIdx] || "").trim() : "";
+      if (trackingId && routeId) entries.push({ trackingId, routeId, routeName: "", address, customerName, customerNumber });
     }
   } else {
     const routeNameCol = findColIdx(headers, customer.loaderMapping.routeNameColumn);
@@ -85,7 +89,9 @@ function parseEntriesFromBuffer(buffer, customer) {
       const trackingId = String(row[trackingIdCol] || "").trim().toUpperCase();
       const routeName = String(row[routeNameCol] || "").trim();
       const address = addressColIdx !== -1 ? String(row[addressColIdx] || "").trim() : "";
-      if (trackingId && routeName) entries.push({ trackingId, routeId: "", routeName, address });
+      const customerName = customerNameColIdx !== -1 ? String(row[customerNameColIdx] || "").trim() : "";
+      const customerNumber = customerNumberColIdx !== -1 ? String(row[customerNumberColIdx] || "").trim() : "";
+      if (trackingId && routeName) entries.push({ trackingId, routeId: "", routeName, address, customerName, customerNumber });
     }
   }
 
@@ -111,6 +117,7 @@ router.get("/customers", protect, requireRole("admin", "loader"), async (req, re
         id: c._id,
         name: c.name,
         displayName: c.displayName,
+        customerNumber: c.customerNumber || "",
         extractionMode: c.extractionMode,
         hasMasterData: c.masterData?.entries?.length > 0,
         hasLoaderMapping: hasMapping,
@@ -126,11 +133,13 @@ router.get("/customers", protect, requireRole("admin", "loader"), async (req, re
 
 // ---------------------------------------------------------------------------
 // POST /api/scanner/upload  — ADMIN ONLY (single file, one customer)
+// Supports optional per-file column overrides: trackingIdColumn, routeIdColumn,
+// routeNameColumn, addressColumn passed in req.body
 // ---------------------------------------------------------------------------
 router.post("/upload", protect, requireRole("admin"), upload.single("file"), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ message: "No file uploaded" });
-    const { customerId } = req.body;
+    const { customerId, trackingIdColumn, routeIdColumn, routeNameColumn, addressColumn, customerNameColumn, customerNumberColumn } = req.body;
     if (!customerId) return res.status(400).json({ message: "customerId is required" });
 
     const customer = await Customer.findById(customerId);
@@ -140,8 +149,22 @@ router.post("/upload", protect, requireRole("admin"), upload.single("file"), asy
     if (!customer.loaderMapping?.trackingIdColumn)
       return res.status(400).json({ message: `No Excel format configured for "${customer.displayName}".` });
 
+    // Build a merged mapping: saved mapping + any per-file overrides
+    const effectiveCustomer = {
+      ...customer.toObject(),
+      loaderMapping: {
+        ...customer.loaderMapping,
+        ...(trackingIdColumn && { trackingIdColumn }),
+        ...(routeIdColumn    && { routeIdColumn }),
+        ...(routeNameColumn  && { routeNameColumn }),
+        ...(addressColumn    && { addressColumn }),
+        ...(customerNameColumn   && { customerNameColumn }),
+        ...(customerNumberColumn && { customerNumberColumn }),
+      },
+    };
+
     let entries, meta;
-    try { ({ entries, meta } = parseEntriesFromBuffer(req.file.buffer, customer)); }
+    try { ({ entries, meta } = parseEntriesFromBuffer(req.file.buffer, effectiveCustomer)); }
     catch (err) { return res.status(400).json({ message: err.message }); }
 
     if (entries.length === 0)
@@ -175,14 +198,21 @@ router.post("/upload", protect, requireRole("admin"), upload.single("file"), asy
 
 // ---------------------------------------------------------------------------
 // POST /api/scanner/upload-multiple  — ADMIN ONLY (multiple files, one customer)
+// Supports per-file column overrides via JSON field "fileMappings":
+// [{ trackingIdColumn, routeIdColumn, routeNameColumn, addressColumn }, ...]
+// parallel array matching files[]
 // ---------------------------------------------------------------------------
 router.post("/upload-multiple", protect, requireRole("admin"), upload.array("files", 20), async (req, res) => {
   try {
     const files = req.files;
     if (!files || files.length === 0) return res.status(400).json({ message: "No files uploaded" });
 
-    const { customerId } = req.body;
+    const { customerId, fileMappings: fileMappingsRaw } = req.body;
     if (!customerId) return res.status(400).json({ message: "customerId is required" });
+
+    // Parse per-file mappings if provided
+    let fileMappings = [];
+    try { fileMappings = fileMappingsRaw ? JSON.parse(fileMappingsRaw) : []; } catch { fileMappings = []; }
 
     const customer = await Customer.findById(customerId);
     if (!customer) return res.status(404).json({ message: "Customer not found" });
@@ -195,9 +225,24 @@ router.post("/upload-multiple", protect, requireRole("admin"), upload.array("fil
     let combinedMeta = { tripSheetId: "", vehicle: "", date: "", route: "" };
     const fileNames = [];
 
-    for (const file of files) {
+    for (let i = 0; i < files.length; i++) {
+      const file    = files[i];
+      const mapping = fileMappings[i] || {};
+      const effectiveCustomer = {
+        ...customer.toObject(),
+        loaderMapping: {
+          ...customer.loaderMapping,
+          ...(mapping.trackingIdColumn && { trackingIdColumn: mapping.trackingIdColumn }),
+          ...(mapping.routeIdColumn    && { routeIdColumn:    mapping.routeIdColumn }),
+          ...(mapping.routeNameColumn  && { routeNameColumn:  mapping.routeNameColumn }),
+          ...(mapping.addressColumn    && { addressColumn:    mapping.addressColumn }),
+          ...(mapping.customerNameColumn   && { customerNameColumn:   mapping.customerNameColumn }),
+          ...(mapping.customerNumberColumn && { customerNumberColumn: mapping.customerNumberColumn }),
+        },
+      };
+
       let parsed;
-      try { parsed = parseEntriesFromBuffer(file.buffer, customer); }
+      try { parsed = parseEntriesFromBuffer(file.buffer, effectiveCustomer); }
       catch (err) { return res.status(400).json({ message: `Error in file "${file.originalname}": ${err.message}` }); }
       allEntries = allEntries.concat(parsed.entries);
       fileNames.push(file.originalname);
@@ -235,6 +280,77 @@ router.post("/upload-multiple", protect, requireRole("admin"), upload.array("fil
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Server error while processing shipment files" });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/scanner/upload-undelivered  — ADMIN ONLY
+// Accepts a single undelivered Excel file with trackingId + reason columns.
+// Merges into the current active batch as isUndelivered=true entries.
+// Body fields: customerId, trackingIdColumn, reasonColumn
+// ---------------------------------------------------------------------------
+router.post("/upload-undelivered", protect, requireRole("admin"), upload.single("file"), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ message: "No file uploaded" });
+    const { customerId, trackingIdColumn, reasonColumn } = req.body;
+    if (!customerId)        return res.status(400).json({ message: "customerId is required" });
+    if (!trackingIdColumn)  return res.status(400).json({ message: "trackingIdColumn is required" });
+
+    const customer = await Customer.findById(customerId);
+    if (!customer) return res.status(404).json({ message: "Customer not found" });
+
+    // Find the current active batch for this customer
+    let batch = await ShipmentBatch.findOne({ customer: customerId, active: true }).sort({ createdAt: -1 });
+    if (!batch) return res.status(404).json({ message: `No active shipment batch found for "${customer.displayName}". Upload daily data first.` });
+
+    // Parse the undelivered file
+    const { headers, headerRowIndex, rows } = readExcelHeaders(req.file.buffer);
+    const tidColIdx    = findColIdx(headers, trackingIdColumn);
+    const reasonColIdx = reasonColumn ? findColIdx(headers, reasonColumn) : -1;
+
+    if (tidColIdx === -1)
+      return res.status(400).json({ message: `Column "${trackingIdColumn}" not found in file` });
+
+    const newEntries = [];
+    for (let i = headerRowIndex + 1; i < rows.length; i++) {
+      const row        = rows[i];
+      const trackingId = String(row[tidColIdx] || "").trim().toUpperCase();
+      const reason     = reasonColIdx !== -1 ? String(row[reasonColIdx] || "").trim() : "Undelivered";
+      if (!trackingId) continue;
+
+      // If already in batch, update it; otherwise add new entry
+      const existing = batch.entries.find((e) => e.trackingId === trackingId);
+      if (existing) {
+        existing.isUndelivered     = true;
+        existing.undeliveredReason = reason || "Undelivered";
+      } else {
+        newEntries.push({
+          trackingId,
+          routeId:           "",
+          routeName:         "",
+          address:           "",
+          isUndelivered:     true,
+          undeliveredReason: reason || "Undelivered",
+        });
+      }
+    }
+
+    // Add new entries that weren't already in batch
+    batch.entries.push(...newEntries);
+    batch.markModified("entries");
+    await batch.save();
+
+    const totalUndelivered = batch.entries.filter((e) => e.isUndelivered).length;
+
+    res.json({
+      message: `Undelivered data merged for "${customer.displayName}"`,
+      newEntries:      newEntries.length,
+      updatedEntries:  (batch.entries.length - newEntries.length),
+      totalUndelivered,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error while processing undelivered file" });
   }
 });
 
@@ -385,10 +501,31 @@ router.post("/scan", protect, requireRole("admin", "loader"), async (req, res) =
           customerName: customer.displayName,
         });
 
+      // ── Undelivered check (single-customer mode) ──
+      if (entry.isUndelivered) {
+        return res.json({
+          valid: true,
+          isUndelivered: true,
+          undeliveredReason: entry.undeliveredReason || "Undelivered",
+          customerName: customer.displayName,
+          recipientName: entry.customerName || "",
+          recipientNumber: entry.customerNumber || "",
+          trackingId: entry.trackingId,
+          routeId: entry.routeId || "",
+          routeName: entry.routeName || "",
+          address: entry.address || "",
+          meta: batch.meta,
+          extractionMode: customer.extractionMode,
+        });
+      }
+
       if (customer.extractionMode === "direct") {
         return res.json({
           valid: true,
+          isUndelivered: false,
           customerName: customer.displayName,
+          recipientName: entry.customerName || "",
+          recipientNumber: entry.customerNumber || "",
           trackingId: entry.trackingId,
           routeId: "",
           routeName: entry.routeName,
@@ -416,7 +553,10 @@ router.post("/scan", protect, requireRole("admin", "loader"), async (req, res) =
 
       return res.json({
         valid: true,
+        isUndelivered: false,
         customerName: customer.displayName,
+        recipientName: entry.customerName || "",
+        recipientNumber: entry.customerNumber || "",
         trackingId: entry.trackingId,
         routeId: entry.routeId,
         routeName: masterEntry.routeName,
@@ -440,10 +580,31 @@ router.post("/scan", protect, requireRole("admin", "loader"), async (req, res) =
       const entry = batch.entries.find((e) => e.trackingId === cleanId);
       if (!entry) continue;
 
+      // ── Undelivered check (multi-customer mode) ──
+      if (entry.isUndelivered) {
+        return res.json({
+          valid: true,
+          isUndelivered: true,
+          undeliveredReason: entry.undeliveredReason || "Undelivered",
+          customerName: customer.displayName,
+          recipientName: entry.customerName || "",
+          recipientNumber: entry.customerNumber || "",
+          trackingId: entry.trackingId,
+          routeId: entry.routeId || "",
+          routeName: entry.routeName || "",
+          address: entry.address || "",
+          meta: batch.meta,
+          extractionMode: customer.extractionMode,
+        });
+      }
+
       if (customer.extractionMode === "direct") {
         return res.json({
           valid: true,
+          isUndelivered: false,
           customerName: customer.displayName,
+          recipientName: entry.customerName || "",
+          recipientNumber: entry.customerNumber || "",
           trackingId: entry.trackingId,
           routeId: "",
           routeName: entry.routeName,
@@ -474,7 +635,10 @@ router.post("/scan", protect, requireRole("admin", "loader"), async (req, res) =
 
       return res.json({
         valid: true,
+        isUndelivered: false,
         customerName: customer.displayName,
+        recipientName: entry.customerName || "",
+        recipientNumber: entry.customerNumber || "",
         trackingId: entry.trackingId,
         routeId: entry.routeId,
         routeName: masterEntry.routeName,
@@ -503,21 +667,29 @@ router.post("/history-download", protect, requireRole("admin", "loader"), async 
     const customer = customerId ? await Customer.findById(customerId) : null;
     const customerLabel = customer?.displayName || "AllCustomers";
 
-    const rows = history.map((item) => ({
-      "Timestamp":     item.timestamp,
-      "Tracking ID":   item.trackingId,
-      "Customer":      item.customerName || "",
-      "Route ID":      item.routeId || "",
-      "Route Name":    item.valid ? item.routeName : "",
-      "Address":       item.address || "",
-      "Status":        item.valid ? "Valid" : "Invalid",
-      "Remarks":       item.valid ? "" : (item.message || "Invalid Package"),
+    // Exclude undelivered entries from the downloaded Excel sheet
+    const deliveredHistory = history.filter((item) => !item.isUndelivered);
+
+    const rows = deliveredHistory.map((item) => ({
+      "Timestamp":       item.timestamp,
+      "Tracking ID":     item.trackingId,
+      "Customer":        item.customerName || "",
+      "Customer Name":   item.recipientName || "",
+      "Customer Number": item.recipientNumber || "",
+      "Route ID":        item.routeId || "",
+      "Route Name":      item.valid ? item.routeName : "",
+      "Address":         item.address || "",
+      "Status":          item.valid ? "Valid" : "Invalid",
+      "Remarks":         item.valid ? "" : (item.message || "Invalid Package"),
     }));
+
+    if (rows.length === 0)
+      return res.status(400).json({ message: "No deliverable scan history to export (all entries were undelivered)" });
 
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.json_to_sheet(rows);
     ws["!cols"] = [
-      { wch: 12 }, { wch: 22 }, { wch: 18 }, { wch: 14 }, { wch: 24 }, { wch: 35 }, { wch: 10 }, { wch: 28 },
+      { wch: 12 }, { wch: 22 }, { wch: 18 }, { wch: 20 }, { wch: 16 }, { wch: 14 }, { wch: 24 }, { wch: 35 }, { wch: 10 }, { wch: 28 },
     ];
     XLSX.utils.book_append_sheet(wb, ws, "Scan History");
 

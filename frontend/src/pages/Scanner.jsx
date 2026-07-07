@@ -17,35 +17,44 @@ const Scanner = () => {
 
   // ---- Speak using Microsoft Heera / en-IN voice ----
   const speak = (text) => {
-    if (!("speechSynthesis" in window)) return;
+    if (!text || !("speechSynthesis" in window)) return;
     window.speechSynthesis.cancel();
-    const trySpeak = () => {
-      const voices = window.speechSynthesis.getVoices();
+
+    const doSpeak = (voices) => {
       const voice =
         voices.find(v => v.name === "Microsoft Heera Desktop - English (India)") ||
         voices.find(v => v.name === "Microsoft Heera - English (India)")         ||
         voices.find(v => v.name === "Microsoft Ravi Desktop - English (India)")  ||
         voices.find(v => v.name === "Microsoft Ravi - English (India)")          ||
-        voices.find(v => v.lang === "en-IN");
-      const utterance = new SpeechSynthesisUtterance(text);
+        voices.find(v => v.lang === "en-IN")                                     ||
+        voices.find(v => v.lang.startsWith("en"));
+      const utterance = new SpeechSynthesisUtterance(String(text));
       if (voice) utterance.voice = voice;
-      utterance.lang = "en-IN";
-      utterance.rate = 0.85;
+      utterance.lang  = "en-IN";
+      utterance.rate  = 0.85;
       utterance.pitch = 1;
       utterance.volume = 1;
       window.speechSynthesis.speak(utterance);
     };
-    if (window.speechSynthesis.getVoices().length) { trySpeak(); }
-    else { window.speechSynthesis.onvoiceschanged = () => { trySpeak(); window.speechSynthesis.onvoiceschanged = null; }; }
+
+    const voices = window.speechSynthesis.getVoices();
+    if (voices.length > 0) {
+      doSpeak(voices);
+    } else {
+      window.speechSynthesis.onvoiceschanged = () => {
+        doSpeak(window.speechSynthesis.getVoices());
+        window.speechSynthesis.onvoiceschanged = null;
+      };
+    }
   };
 
-  // ---- Fetch active batch summary (all active customers) ----
+  // ---- Fetch active batch summary ----
   const fetchBatchInfo = async () => {
     try {
       const res = await api.get("/scanner/current-batch");
       const batches = Array.isArray(res.data) ? res.data : [];
       setBatchInfo(batches.length > 0 ? batches : null);
-    } catch (err) { setBatchInfo(null); }
+    } catch { setBatchInfo(null); }
   };
 
   useEffect(() => {
@@ -66,33 +75,65 @@ const Scanner = () => {
     e.preventDefault();
     const id = scanInput.trim();
     if (!id) return;
+
     try {
-      // No customerId — backend searches all active batches automatically
       const res = await api.post("/scanner/scan", { trackingId: id });
       const data = res.data;
-      setScanResult(data);
       const timestamp = new Date().toLocaleTimeString();
-      if (data.valid) {
-        speak(data.routeName);
+
+      if (data.valid && data.isUndelivered) {
+        // ── Undelivered package ──
+        const reason = data.undeliveredReason || "Undelivered";
+        setScanResult({ ...data, isUndelivered: true });
+        speak(reason);
         setHistory((prev) => [{
           timestamp,
-          trackingId: data.trackingId,
+          trackingId: data.trackingId || id,
           customerName: data.customerName || "",
-          routeId: data.routeId || "",
-          routeName: data.routeName,
+          recipientName: data.recipientName || "",
+          recipientNumber: data.recipientNumber || "",
+          routeId: "",
+          routeName: "",
           address: data.address || "",
           valid: true,
+          isUndelivered: true,
+          undeliveredReason: reason,
         }, ...prev]);
+
+      } else if (data.valid) {
+        // ── Valid delivered package ──
+        const routeName = data.routeName || "";
+        // speak route name; fall back to customer name so TTS is never silent
+        speak(routeName || data.customerName || "Valid Package");
+        setScanResult(data);
+        setHistory((prev) => [{
+          timestamp,
+          trackingId: data.trackingId || id,
+          customerName: data.customerName || "",
+          recipientName: data.recipientName || "",
+          recipientNumber: data.recipientNumber || "",
+          routeId: data.routeId || "",
+          routeName,
+          address: data.address || "",
+          valid: true,
+          isUndelivered: false,
+        }, ...prev]);
+
       } else {
+        // ── Invalid ──
+        setScanResult(data);
         speak("Invalid Package");
         setHistory((prev) => [{
           timestamp,
           trackingId: id,
           customerName: data.customerName || "",
+          recipientName: data.recipientName || "",
+          recipientNumber: data.recipientNumber || "",
           routeId: "",
           routeName: "",
           address: "",
           valid: false,
+          isUndelivered: false,
           message: data.message || "Invalid Package",
         }, ...prev]);
       }
@@ -100,20 +141,33 @@ const Scanner = () => {
       const message = err.response?.data?.message || "Something went wrong. Please try again.";
       setScanResult({ valid: false, message, error: true });
       speak("Invalid Package");
-    } finally { setScanInput(""); inputRef.current?.focus(); }
+    } finally {
+      setScanInput("");
+      inputRef.current?.focus();
+    }
   };
 
-  // ---- Download history (deduplicated) ----
+  // ---- Download history (excludes undelivered) ----
   const handleDownloadHistory = async () => {
     if (history.length === 0) return;
     setDownloading(true);
     try {
+      // Filter out undelivered entries — backend also excludes them, but filter here too
       const seen = new Set();
-      const uniqueHistory = history.filter((item) => {
-        if (seen.has(item.trackingId)) return false;
-        seen.add(item.trackingId);
-        return true;
-      });
+      const uniqueHistory = history
+        .filter((item) => !item.isUndelivered)
+        .filter((item) => {
+          if (seen.has(item.trackingId)) return false;
+          seen.add(item.trackingId);
+          return true;
+        });
+
+      if (uniqueHistory.length === 0) {
+        alert("No deliverable scan history to export. All scanned items were undelivered.");
+        setDownloading(false);
+        return;
+      }
+
       const res = await api.post("/scanner/history-download", {
         customerId: null,
         history: uniqueHistory,
@@ -129,7 +183,7 @@ const Scanner = () => {
       link.setAttribute("download", filename);
       document.body.appendChild(link); link.click(); link.remove();
       window.URL.revokeObjectURL(url);
-    } catch (err) {
+    } catch {
       alert("Failed to download history. Please try again.");
     } finally { setDownloading(false); }
   };
@@ -155,7 +209,7 @@ const Scanner = () => {
       <main className="content">
 
         {/* Active batch summary banner */}
-        {batchInfo && Array.isArray(batchInfo) && batchInfo.length > 0 && (
+        {batchInfo && batchInfo.length > 0 && (
           <div className="info-box">
             <strong>Today's active shipments:</strong>{" "}
             {batchInfo.map((b) => `${b.customerName} (${b.count})`).join(" · ")}
@@ -184,9 +238,35 @@ const Scanner = () => {
 
         {/* Result card */}
         {scanResult && (
-          <div className={`card result-card ${scanResult.valid ? "result-valid" : "result-invalid"}`}>
-            {scanResult.valid ? (
-              <>
+          <>
+            {/* ── Undelivered result ── */}
+            {scanResult.valid && scanResult.isUndelivered ? (
+              <div className="card result-card" style={{
+                border: "2px solid #f59e0b",
+                background: "#fffbeb",
+              }}>
+                <div style={{
+                  fontSize: "13px", fontWeight: 700, color: "#b45309",
+                  letterSpacing: "0.5px", textTransform: "uppercase", marginBottom: "6px",
+                }}>
+                  ⚠️ Undelivered Package
+                </div>
+                <div style={{ fontSize: "28px", fontWeight: 800, color: "#92400e", marginBottom: "8px" }}>
+                  {scanResult.undeliveredReason || "Undelivered"}
+                </div>
+                {scanResult.customerName && (
+                  <div style={{ fontSize: "13px", fontWeight: 600, color: "#b45309", marginBottom: "6px" }}>
+                    {scanResult.customerName}
+                  </div>
+                )}
+                <div className="result-details">
+                  <span>Tracking ID: {scanResult.trackingId}</span>
+                </div>
+              </div>
+
+            ) : scanResult.valid ? (
+              /* ── Valid delivered result ── */
+              <div className={`card result-card result-valid`}>
                 <div className="result-hero">{scanResult.routeName}</div>
                 {scanResult.customerName && (
                   <div style={{
@@ -199,10 +279,13 @@ const Scanner = () => {
                 <div className="result-details">
                   <span>Tracking ID: {scanResult.trackingId}</span>
                   {scanResult.routeId && <span>Route ID: {scanResult.routeId}</span>}
+                  {scanResult.address && <span>Address: {scanResult.address}</span>}
                 </div>
-              </>
+              </div>
+
             ) : (
-              <>
+              /* ── Invalid result ── */
+              <div className="card result-card result-invalid">
                 <div className="result-hero result-hero-invalid">
                   {scanResult.message || "Invalid Package"}
                 </div>
@@ -211,9 +294,9 @@ const Scanner = () => {
                     Customer: {scanResult.customerName}
                   </div>
                 )}
-              </>
+              </div>
             )}
-          </div>
+          </>
         )}
 
         {/* Scan history */}
@@ -235,8 +318,13 @@ const Scanner = () => {
                 Total Shipments Scanned
               </div>
               <div style={{ fontSize: "52px", fontWeight: 800, lineHeight: 1.1 }}>
-                {new Set(history.filter(i => i.valid).map(i => i.trackingId)).size}
+                {new Set(history.filter(i => i.valid && !i.isUndelivered).map(i => i.trackingId)).size}
               </div>
+              {history.some(i => i.isUndelivered) && (
+                <div style={{ fontSize: "13px", opacity: 0.85, marginTop: 4 }}>
+                  + {history.filter(i => i.isUndelivered).length} undelivered (excluded from Excel)
+                </div>
+              )}
             </div>
 
             <table className="history-table">
@@ -245,17 +333,34 @@ const Scanner = () => {
                   <th>Time</th>
                   <th>Tracking ID</th>
                   <th>Customer</th>
+                  <th>Customer Name</th>
+                  <th>Customer Number</th>
                   <th>Result</th>
                   <th>Address</th>
                 </tr>
               </thead>
               <tbody>
                 {history.map((item, idx) => (
-                  <tr key={idx} className={item.valid ? "row-valid" : "row-invalid"}>
+                  <tr
+                    key={idx}
+                    className={item.isUndelivered ? "" : item.valid ? "row-valid" : "row-invalid"}
+                    style={item.isUndelivered ? {
+                      background: "#fffbeb",
+                      borderLeft: "3px solid #f59e0b",
+                    } : {}}
+                  >
                     <td>{item.timestamp}</td>
                     <td>{item.trackingId}</td>
                     <td>{item.customerName || "—"}</td>
-                    <td>{item.valid ? item.routeName : item.message}</td>
+                    <td>{item.recipientName || "—"}</td>
+                    <td>{item.recipientNumber || "—"}</td>
+                    <td>
+                      {item.isUndelivered
+                        ? <span style={{ color: "#b45309", fontWeight: 600 }}>⚠️ {item.undeliveredReason || "Undelivered"}</span>
+                        : item.valid
+                          ? item.routeName
+                          : item.message}
+                    </td>
                     <td>{item.address || ""}</td>
                   </tr>
                 ))}

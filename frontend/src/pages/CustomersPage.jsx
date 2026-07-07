@@ -8,6 +8,7 @@ const CustomersPage = () => {
   const { auth, logout } = useAuth();
   const navigate = useNavigate();
 
+  const [mode, setMode] = useState(null); // null | "scanning" | "routing"
   const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -57,9 +58,114 @@ const CustomersPage = () => {
 
   const handleLogout = () => { logout(); navigate("/login"); };
 
-  const modeLabel = (mode) =>
-    mode === "direct" ? "TrackingID → RouteName" : "TrackingID → RouteID → RouteName";
+  const modeLabel = (m) =>
+    m === "direct" ? "TrackingID → RouteName" : "TrackingID → RouteID → RouteName";
 
+  // ── MODE SELECTION SCREEN ──
+  if (!mode) {
+    return (
+      <div className="page">
+        <header className="top-bar">
+          <div className="top-bar-logo">
+            <img src={logo} alt="SmartShip Logistics" />
+            <span className="top-bar-logo-label">Admin</span>
+          </div>
+          <div className="top-bar-right">
+            <span className="username-tag">{auth?.username}</span>
+            <button className="btn btn-outline" onClick={handleLogout}>Logout</button>
+          </div>
+        </header>
+
+        <main className="content" style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "70vh" }}>
+          <h2 style={{ fontSize: 22, fontWeight: 800, color: "var(--brand-navy)", marginBottom: 8, textAlign: "center" }}>
+            What would you like to do?
+          </h2>
+          <p style={{ color: "var(--color-text-muted)", marginBottom: 40, textAlign: "center", fontSize: 14 }}>
+            Choose a module to get started
+          </p>
+
+          <div style={{ display: "flex", gap: 24, flexWrap: "wrap", justifyContent: "center", maxWidth: 1000 }}>
+            {/* Scanning card */}
+            <button
+              onClick={() => setMode("scanning")}
+              style={{
+                flex: "1 1 280px", maxWidth: 300,
+                padding: "36px 28px", borderRadius: 16,
+                border: "2px solid var(--color-border)",
+                background: "var(--color-surface-raised)",
+                cursor: "pointer", textAlign: "left",
+                transition: "border-color 0.15s, box-shadow 0.15s",
+                boxShadow: "0 2px 8px rgba(0,0,0,0.06)",
+              }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = "var(--brand-teal)"; e.currentTarget.style.boxShadow = "0 4px 16px rgba(0,0,0,0.12)"; }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--color-border)"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.06)"; }}
+            >
+              <div style={{ fontSize: 40, marginBottom: 16 }}>📦</div>
+              <div style={{ fontSize: 18, fontWeight: 800, color: "var(--brand-navy)", marginBottom: 8 }}>Scanning</div>
+              <div style={{ fontSize: 13, color: "var(--color-text-muted)", lineHeight: 1.6 }}>
+                Upload shipment data and let loaders scan barcodes to identify routes with voice announcements.
+              </div>
+              <div style={{ marginTop: 20, fontSize: 13, fontWeight: 700, color: "var(--brand-teal)" }}>
+                Get started →
+              </div>
+            </button>
+
+            {/* Routing card */}
+            <button
+              onClick={() => navigate("/routing")}
+              style={{
+                flex: "1 1 280px", maxWidth: 300,
+                padding: "36px 28px", borderRadius: 16,
+                border: "2px solid var(--color-border)",
+                background: "var(--color-surface-raised)",
+                cursor: "pointer", textAlign: "left",
+                transition: "border-color 0.15s, box-shadow 0.15s",
+                boxShadow: "0 2px 8px rgba(0,0,0,0.06)",
+              }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = "#6366f1"; e.currentTarget.style.boxShadow = "0 4px 16px rgba(0,0,0,0.12)"; }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--color-border)"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.06)"; }}
+            >
+              <div style={{ fontSize: 40, marginBottom: 16 }}>🗺️</div>
+              <div style={{ fontSize: 18, fontWeight: 800, color: "var(--brand-navy)", marginBottom: 8 }}>Routing</div>
+              <div style={{ fontSize: 13, color: "var(--color-text-muted)", lineHeight: 1.6 }}>
+                Upload master route data and a shipment Excel to automatically assign route names based on address and pincode matching.
+              </div>
+              <div style={{ marginTop: 20, fontSize: 13, fontWeight: 700, color: "#6366f1" }}>
+                Get started →
+              </div>
+            </button>
+
+            {/* Extension card */}
+            <button
+              onClick={() => navigate("/extension")}
+              style={{
+                flex: "1 1 280px", maxWidth: 300,
+                padding: "36px 28px", borderRadius: 16,
+                border: "2px solid var(--color-border)",
+                background: "var(--color-surface-raised)",
+                cursor: "pointer", textAlign: "left",
+                transition: "border-color 0.15s, box-shadow 0.15s",
+                boxShadow: "0 2px 8px rgba(0,0,0,0.06)",
+              }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = "#f59e0b"; e.currentTarget.style.boxShadow = "0 4px 16px rgba(0,0,0,0.12)"; }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--color-border)"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.06)"; }}
+            >
+              <div style={{ fontSize: 40, marginBottom: 16 }}>🧩</div>
+              <div style={{ fontSize: 18, fontWeight: 800, color: "var(--brand-navy)", marginBottom: 8 }}>Extension</div>
+              <div style={{ fontSize: 13, color: "var(--color-text-muted)", lineHeight: 1.6 }}>
+                Upload Store Code / Area to Route Name mapping used by the SmartShip Chrome Extension for instant staff lookups.
+              </div>
+              <div style={{ marginTop: 20, fontSize: 13, fontWeight: 700, color: "#f59e0b" }}>
+                Get started →
+              </div>
+            </button>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
+  // ── SCANNING PANEL ──
   return (
     <div className="page">
       <header className="top-bar">
@@ -69,6 +175,7 @@ const CustomersPage = () => {
         </div>
         <div className="top-bar-right">
           <span className="username-tag">{auth?.username}</span>
+          <button className="btn btn-outline" onClick={() => setMode(null)}>← Home</button>
           <button className="btn btn-outline" onClick={() => navigate("/scanner")}>Scanner</button>
           <button className="btn btn-outline" onClick={handleLogout}>Logout</button>
         </div>

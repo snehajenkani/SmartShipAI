@@ -16,6 +16,12 @@ const customerSchema = new mongoose.Schema(
       trim: true,
     },
 
+    customerNumber: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
     extractionMode: {
       type: String,
       enum: ["route-lookup", "direct"],
@@ -27,6 +33,8 @@ const customerSchema = new mongoose.Schema(
       routeIdColumn:    { type: String, trim: true },
       routeNameColumn:  { type: String, trim: true },
       addressColumn:    { type: String, trim: true }, // NEW
+      customerNameColumn:   { type: String, trim: true }, // recipient name, per-row
+      customerNumberColumn: { type: String, trim: true }, // recipient number, per-row
       sampleFileName:   { type: String },
       setAt:            { type: Date },
     },

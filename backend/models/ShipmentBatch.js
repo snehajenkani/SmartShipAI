@@ -19,7 +19,26 @@ const shipmentEntrySchema = new mongoose.Schema(
       trim: true,
       default: "",
     },
-    address: {        // NEW
+    customerName: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    customerNumber: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    address: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    isUndelivered: {
+      type: Boolean,
+      default: false,
+    },
+    undeliveredReason: {
       type: String,
       trim: true,
       default: "",
