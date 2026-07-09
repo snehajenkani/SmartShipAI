@@ -368,7 +368,7 @@ router.post("/customers/:customerId/loader-mapping", protect, requireRole("admin
       return res.status(400).json({ message: "No sample file uploaded" });
 
     const { headers } = readExcelHeaders(req.file.buffer);
-    const { trackingIdColumn, routeIdColumn, routeNameColumn, addressColumn, customerNameColumn, customerNumberColumn } = req.body;
+    const { trackingIdColumn, routeIdColumn, routeNameColumn, addressColumn, colorColumn, customerNameColumn, customerNumberColumn } = req.body;
 
     if (!trackingIdColumn)
       return res.status(400).json({ message: "trackingIdColumn is required" });
@@ -384,6 +384,7 @@ router.post("/customers/:customerId/loader-mapping", protect, requireRole("admin
         routeIdColumn,
         routeNameColumn: "",
         addressColumn: addressColumn || "",
+        colorColumn: colorColumn || "",
         customerNameColumn: customerNameColumn || "",
         customerNumberColumn: customerNumberColumn || "",
         sampleFileName: req.file.originalname,
@@ -400,6 +401,7 @@ router.post("/customers/:customerId/loader-mapping", protect, requireRole("admin
         routeIdColumn: "",
         routeNameColumn,
         addressColumn: addressColumn || "",
+        colorColumn: colorColumn || "",
         customerNameColumn: customerNameColumn || "",
         customerNumberColumn: customerNumberColumn || "",
         sampleFileName: req.file.originalname,
@@ -415,6 +417,7 @@ router.post("/customers/:customerId/loader-mapping", protect, requireRole("admin
       routeIdColumn: customer.loaderMapping.routeIdColumn,
       routeNameColumn: customer.loaderMapping.routeNameColumn,
       addressColumn: customer.loaderMapping.addressColumn,
+      colorColumn: customer.loaderMapping.colorColumn,
       customerNameColumn: customer.loaderMapping.customerNameColumn,
       customerNumberColumn: customer.loaderMapping.customerNumberColumn,
       extractionMode: customer.extractionMode,
@@ -442,6 +445,7 @@ router.get("/customers/:customerId/loader-mapping", protect, requireRole("admin"
       routeIdColumn: customer.loaderMapping.routeIdColumn,
       routeNameColumn: customer.loaderMapping.routeNameColumn,
       addressColumn: customer.loaderMapping.addressColumn || "",
+      colorColumn: customer.loaderMapping.colorColumn || "",
       customerNameColumn: customer.loaderMapping.customerNameColumn || "",
       customerNumberColumn: customer.loaderMapping.customerNumberColumn || "",
       sampleFileName: customer.loaderMapping.sampleFileName,

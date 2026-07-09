@@ -94,6 +94,100 @@ const FileColumnCard = ({ fileName, headers, extractionMode, mapping, onChange, 
 };
 
 // ---------------------------------------------------------------------------
+// Color Master file upload/edit card — Branch/Area/Pincode → Colour
+// Available regardless of extraction mode (route-lookup or direct).
+// ---------------------------------------------------------------------------
+const ColorMasterFileCard = ({
+  savedFileName, savedCount, savedAt, savedMapping,
+  editing, onStartEdit, onCancelEdit,
+  file, headers, busy, onFileChange,
+  branchCol, setBranchCol,
+  areaCol, setAreaCol,
+  pincodeCol, setPincodeCol,
+  colourCol, setColourCol,
+  onSave, saving,
+}) => {
+  const hasSaved = !!savedFileName;
+  const accent = "#d946ef";
+  const canSave = colourCol && (branchCol || areaCol || pincodeCol);
+
+  return (
+    <div>
+      {/* SAVED STATE (not editing) */}
+      {hasSaved && !editing && (
+        <div style={{ fontSize: 13 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
+            <div style={{ color: accent, fontWeight: 700 }}>✅ Saved & active</div>
+            <button onClick={onStartEdit} style={{
+              fontSize: 12, fontWeight: 600, color: "var(--color-text-muted)",
+              background: "none", border: "1px solid var(--color-border)", borderRadius: 6,
+              padding: "4px 10px", cursor: "pointer",
+            }}>
+              ✏️ Change
+            </button>
+          </div>
+          <div style={{ color: "var(--color-text-muted)" }}>
+            📄 {savedFileName} · {savedCount} entries
+            {savedAt && <> · {new Date(savedAt).toLocaleDateString()}</>}
+          </div>
+          {savedMapping && (
+            <div style={{ color: "var(--color-text-muted)", marginTop: 4, fontSize: 12 }}>
+              {[savedMapping.branchColumn && `Branch: ${savedMapping.branchColumn}`,
+                savedMapping.areaColumn && `Area: ${savedMapping.areaColumn}`,
+                savedMapping.pincodeColumn && `Pincode: ${savedMapping.pincodeColumn}`]
+                .filter(Boolean).join(" · ")} · Colour: {savedMapping.colourColumn}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* UPLOAD / EDIT STATE */}
+      {(!hasSaved || editing) && (
+        <div>
+          <input type="file" accept=".xlsx,.xls,.csv" onChange={onFileChange} style={{ fontSize: 13 }} />
+          {busy && <p style={{ fontSize: 12, color: "var(--color-text-muted)", marginTop: 8 }}>Reading columns...</p>}
+          {file && !busy && headers.length === 0 && (
+            <p style={{ fontSize: 12, color: "#dc2626", marginTop: 8 }}>Could not read columns from this file.</p>
+          )}
+          {headers.length > 0 && (
+            <div style={{ marginTop: 14 }}>
+              <div className="mapping-row">
+                <ColSelect label="Branch column" headers={headers} value={branchCol} onChange={setBranchCol} optional />
+                <ColSelect label="Area column" headers={headers} value={areaCol} onChange={setAreaCol} optional />
+                <ColSelect label="Pincode column" headers={headers} value={pincodeCol} onChange={setPincodeCol} optional />
+                <ColSelect label="Colour column" headers={headers} value={colourCol} onChange={setColourCol} />
+              </div>
+              <p style={{ fontSize: 11, color: "var(--color-text-muted)", margin: "8px 0 0" }}>
+                At least one of Branch / Area / Pincode is required, plus Colour.
+              </p>
+              <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                <button
+                  className="btn btn-primary"
+                  disabled={!canSave || saving}
+                  onClick={onSave}
+                  style={{ fontSize: 13, padding: "8px 16px" }}
+                >
+                  {saving ? "Saving..." : "💾 Save"}
+                </button>
+                {editing && (
+                  <button
+                    className="btn btn-outline"
+                    onClick={onCancelEdit}
+                    style={{ fontSize: 13, padding: "8px 16px" }}
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
 // ClientConfigPage
 // ---------------------------------------------------------------------------
 const ClientConfigPage = () => {
@@ -152,6 +246,20 @@ const ClientConfigPage = () => {
   const [undelStatus, setUndelStatus] = useState(null);
   const [undelBusy, setUndelBusy] = useState(false);
 
+  // ── Color Master (Branch/Area/Pincode → Colour) — independent of extraction mode ──
+  const [colorMasterInfo, setColorMasterInfo] = useState(null);
+  const [colorMasterLoading, setColorMasterLoading] = useState(false);
+  const [colorEditing, setColorEditing] = useState(false);
+  const [colorFile, setColorFile] = useState(null);
+  const [colorHeaders, setColorHeaders] = useState([]);
+  const [colorBusy, setColorBusy] = useState(false);
+  const [colorBranchCol, setColorBranchCol] = useState("");
+  const [colorAreaCol, setColorAreaCol] = useState("");
+  const [colorPincodeCol, setColorPincodeCol] = useState("");
+  const [colorColourCol, setColorColourCol] = useState("");
+  const [colorSaving, setColorSaving] = useState(false);
+  const [colorStatus, setColorStatus] = useState(null);
+
   // ── Edit / delete ──
   const [showEdit, setShowEdit] = useState(false);
   const [editName, setEditName] = useState("");
@@ -178,7 +286,16 @@ const ClientConfigPage = () => {
     } catch { setBatchInfo(null); }
   };
 
-  useEffect(() => { fetchCustomer(); fetchBatchInfo(); }, [customerId]);
+  const fetchColorMasterInfo = async () => {
+    setColorMasterLoading(true);
+    try {
+      const res = await api.get(`/routing/customers/${customerId}/master`);
+      setColorMasterInfo(res.data);
+    } catch (err) { console.error(err); }
+    finally { setColorMasterLoading(false); }
+  };
+
+  useEffect(() => { fetchCustomer(); fetchBatchInfo(); fetchColorMasterInfo(); }, [customerId]);
 
   const previewColumns = async (file) => {
     const fd = new FormData();
@@ -246,6 +363,40 @@ const ClientConfigPage = () => {
       window.URL.revokeObjectURL(url);
     } catch { alert("Failed to download master data."); }
     finally { setMasterDownloading(false); }
+  };
+
+  // ── Color Master handlers ──
+  const handleColorFileChange = async (e) => {
+    const file = e.target.files[0];
+    setColorFile(file); setColorStatus(null); setColorHeaders([]);
+    setColorBranchCol(""); setColorAreaCol(""); setColorPincodeCol(""); setColorColourCol("");
+    if (!file) return;
+    setColorBusy(true);
+    try { setColorHeaders(await previewColumns(file)); }
+    catch { setColorStatus({ type: "error", message: "Could not read columns from this file" }); }
+    finally { setColorBusy(false); }
+  };
+
+  const handleSaveColor = async () => {
+    if (!colorFile || !colorColourCol || (!colorBranchCol && !colorAreaCol && !colorPincodeCol)) return;
+    setColorSaving(true); setColorStatus(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", colorFile);
+      if (colorBranchCol)  fd.append("branchColumn", colorBranchCol);
+      if (colorAreaCol)    fd.append("areaColumn", colorAreaCol);
+      if (colorPincodeCol) fd.append("pincodeColumn", colorPincodeCol);
+      fd.append("colourColumn", colorColourCol);
+      await api.post(`/routing/customers/${customerId}/master/color`, fd, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      setColorStatus({ type: "success", message: "Color master data saved." });
+      setColorEditing(false);
+      setColorFile(null); setColorHeaders([]); setColorBranchCol(""); setColorAreaCol(""); setColorPincodeCol(""); setColorColourCol("");
+      await fetchColorMasterInfo();
+    } catch (err) {
+      setColorStatus({ type: "error", message: err.response?.data?.message || "Failed to save color master" });
+    } finally { setColorSaving(false); }
   };
 
   // ── Loader setup (first time) ──
@@ -566,6 +717,38 @@ const ClientConfigPage = () => {
             </button>
           </form>
           {masterStatus && <div className={masterStatus.type === "success" ? "success-message" : "error-message"} style={{ marginTop: "12px" }}>{masterStatus.message}</div>}
+        </div>
+
+        {/* ── SECTION: Color Master (Branch/Area/Pincode → Colour) — available in every mode ── */}
+        <div className="section-label">Color Master</div>
+        <div className="card" style={{ border: "2px solid #d946ef" }}>
+          <p className="helper-text" style={{ marginBottom: "16px" }}>
+            Branch/Area/Pincode → Colour for <strong>{customer.displayName}</strong>. Optional, and available regardless of Lookup Mode — used to color-code scan results. Per-row color from the daily Excel always wins if present.
+          </p>
+          {colorMasterLoading ? (
+            <p className="muted">Loading color master...</p>
+          ) : (
+            <ColorMasterFileCard
+              savedFileName={colorMasterInfo?.colorFileName}
+              savedCount={colorMasterInfo?.colorCount}
+              savedAt={colorMasterInfo?.colorUploadedAt}
+              savedMapping={colorMasterInfo?.colorMapping}
+              editing={colorEditing}
+              onStartEdit={() => setColorEditing(true)}
+              onCancelEdit={() => { setColorEditing(false); setColorFile(null); setColorHeaders([]); }}
+              file={colorFile}
+              headers={colorHeaders}
+              busy={colorBusy}
+              onFileChange={handleColorFileChange}
+              branchCol={colorBranchCol} setBranchCol={setColorBranchCol}
+              areaCol={colorAreaCol} setAreaCol={setColorAreaCol}
+              pincodeCol={colorPincodeCol} setPincodeCol={setColorPincodeCol}
+              colourCol={colorColourCol} setColourCol={setColorColourCol}
+              onSave={handleSaveColor}
+              saving={colorSaving}
+            />
+          )}
+          {colorStatus && <div className={colorStatus.type === "success" ? "success-message" : "error-message"} style={{ marginTop: "12px" }}>{colorStatus.message}</div>}
         </div>
 
         {/* ── SECTION 3: Daily Shipment Data ── */}

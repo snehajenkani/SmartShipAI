@@ -4,6 +4,26 @@ import api from "../services/api.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import logo from "../assets/logo.jpg";
 
+// Picks readable text color (black/white) for any background color the admin
+// used in Excel — works for hex codes ("#4CAF50") and named colors ("orange").
+const getContrastText = (color) => {
+  if (!color) return null;
+  try {
+    const probe = document.createElement("div");
+    probe.style.color = color;
+    document.body.appendChild(probe);
+    const rgb = getComputedStyle(probe).color;
+    document.body.removeChild(probe);
+    const nums = rgb.match(/\d+/g);
+    if (!nums) return null;
+    const [r, g, b] = nums.map(Number);
+    const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+    return luminance > 0.6 ? "#111111" : "#ffffff";
+  } catch {
+    return null;
+  }
+};
+
 const Scanner = () => {
   const [batchInfo, setBatchInfo] = useState(null);
   const [scanInput, setScanInput] = useState("");
@@ -266,20 +286,37 @@ const Scanner = () => {
 
             ) : scanResult.valid ? (
               /* ── Valid delivered result ── */
-              <div className={`card result-card result-valid`}>
-                <div className="result-hero">{scanResult.routeName}</div>
+              <div
+                className="card result-card result-valid"
+                style={
+                  scanResult.color
+                    ? { backgroundColor: scanResult.color, borderColor: scanResult.color }
+                    : undefined
+                }
+              >
+                <div
+                  className="result-hero"
+                  style={scanResult.color ? { color: getContrastText(scanResult.color) } : undefined}
+                >
+                  {scanResult.routeName}
+                </div>
                 {scanResult.customerName && (
                   <div style={{
-                    fontSize: "13px", fontWeight: 600, color: "var(--brand-teal)",
+                    fontSize: "13px", fontWeight: 600,
+                    color: scanResult.color ? getContrastText(scanResult.color) : "var(--brand-teal)",
                     letterSpacing: "0.5px", textTransform: "uppercase", marginTop: "6px",
+                    opacity: scanResult.color ? 0.85 : 1,
                   }}>
                     {scanResult.customerName}
                   </div>
                 )}
-                <div className="result-details">
+                <div
+                  className="result-details"
+                  style={scanResult.color ? { color: getContrastText(scanResult.color), opacity: 0.85 } : undefined}
+                >
                   <span>Tracking ID: {scanResult.trackingId}</span>
                   {scanResult.routeId && <span>Route ID: {scanResult.routeId}</span>}
-                  {scanResult.address && <span>Address: {scanResult.address}</span>}
+                  {scanResult.address && <span className="address-detail">Address: {scanResult.address}</span>}
                 </div>
               </div>
 

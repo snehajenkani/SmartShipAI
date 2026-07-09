@@ -479,11 +479,23 @@ input[type="file"] {
 
 .result-details {
   display: flex;
+  flex-wrap: wrap;
   justify-content: center;
-  gap: 28px;
+  gap: 8px 28px;
   margin-top: 12px;
   font-size: 13px;
   color: var(--color-text-muted);
+}
+
+.result-details span {
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+
+.result-details .address-detail {
+  flex-basis: 100%;
+  max-width: 100%;
+  text-align: center;
 }
 
 @keyframes stamp-in {

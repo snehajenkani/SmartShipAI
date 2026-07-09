@@ -41,6 +41,61 @@ function findColIdx(headers, colName) {
 }
 
 // ---------------------------------------------------------------------------
+// HELPERS: Color Master matching (Branch/Area keyword match, then Pincode fallback)
+// Mirrors the address/pincode matching logic used in routing.js
+// ---------------------------------------------------------------------------
+function normalizeAddr(str) {
+  return String(str || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function keywordMatch(keyword, fullAddress) {
+  const kw = normalizeAddr(keyword);
+  const addr = normalizeAddr(fullAddress);
+  if (!kw || !addr) return false;
+  return addr.includes(kw);
+}
+
+function extractPincode(address) {
+  const match = String(address || "").match(/\b(\d{6})\b/);
+  return match ? match[1] : "";
+}
+
+// ---------------------------------------------------------------------------
+// HELPER: resolveColor — decides what background color a scan result should use
+// Priority: 1) per-row color from the daily Excel (entry.color) — most specific
+//           2) Color Master: Branch/Area keyword match against the entry's address
+//           3) Color Master: Pincode fallback match
+//           4) "" (no color)
+// ---------------------------------------------------------------------------
+function resolveColor(entry, customer) {
+  if (entry.color) return entry.color;
+
+  const colorEntries = customer?.colorMaster?.entries || [];
+  if (colorEntries.length === 0) return "";
+
+  const fullAddress = entry.address || "";
+
+  // Branch/Area keyword match first
+  for (const ce of colorEntries) {
+    if (ce.branch && keywordMatch(ce.branch, fullAddress)) return ce.colour;
+    if (ce.area && keywordMatch(ce.area, fullAddress)) return ce.colour;
+  }
+
+  // Pincode fallback
+  const pincode = extractPincode(fullAddress);
+  if (pincode) {
+    const pincodeMatch = colorEntries.find((ce) => ce.pincode && ce.pincode === pincode);
+    if (pincodeMatch) return pincodeMatch.colour;
+  }
+
+  return "";
+}
+
+// ---------------------------------------------------------------------------
 // HELPER: parse entries from a file buffer for a given customer
 // ---------------------------------------------------------------------------
 function parseEntriesFromBuffer(buffer, customer) {
@@ -66,6 +121,7 @@ function parseEntriesFromBuffer(buffer, customer) {
   const addressColIdx = findColIdx(headers, customer.loaderMapping?.addressColumn);
   const customerNameColIdx = findColIdx(headers, customer.loaderMapping?.customerNameColumn);
   const customerNumberColIdx = findColIdx(headers, customer.loaderMapping?.customerNumberColumn);
+  const colorColIdx = findColIdx(headers, customer.loaderMapping?.colorColumn);
 
   if (customer.extractionMode === "route-lookup") {
     const routeIdCol = findColIdx(headers, customer.loaderMapping.routeIdColumn);
@@ -78,7 +134,8 @@ function parseEntriesFromBuffer(buffer, customer) {
       const address = addressColIdx !== -1 ? String(row[addressColIdx] || "").trim() : "";
       const customerName = customerNameColIdx !== -1 ? String(row[customerNameColIdx] || "").trim() : "";
       const customerNumber = customerNumberColIdx !== -1 ? String(row[customerNumberColIdx] || "").trim() : "";
-      if (trackingId && routeId) entries.push({ trackingId, routeId, routeName: "", address, customerName, customerNumber });
+      const color = colorColIdx !== -1 ? String(row[colorColIdx] || "").trim() : "";
+      if (trackingId && routeId) entries.push({ trackingId, routeId, routeName: "", address, customerName, customerNumber, color });
     }
   } else {
     const routeNameCol = findColIdx(headers, customer.loaderMapping.routeNameColumn);
@@ -91,7 +148,8 @@ function parseEntriesFromBuffer(buffer, customer) {
       const address = addressColIdx !== -1 ? String(row[addressColIdx] || "").trim() : "";
       const customerName = customerNameColIdx !== -1 ? String(row[customerNameColIdx] || "").trim() : "";
       const customerNumber = customerNumberColIdx !== -1 ? String(row[customerNumberColIdx] || "").trim() : "";
-      if (trackingId && routeName) entries.push({ trackingId, routeId: "", routeName, address, customerName, customerNumber });
+      const color = colorColIdx !== -1 ? String(row[colorColIdx] || "").trim() : "";
+      if (trackingId && routeName) entries.push({ trackingId, routeId: "", routeName, address, customerName, customerNumber, color });
     }
   }
 
@@ -139,7 +197,7 @@ router.get("/customers", protect, requireRole("admin", "loader"), async (req, re
 router.post("/upload", protect, requireRole("admin"), upload.single("file"), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ message: "No file uploaded" });
-    const { customerId, trackingIdColumn, routeIdColumn, routeNameColumn, addressColumn, customerNameColumn, customerNumberColumn } = req.body;
+    const { customerId, trackingIdColumn, routeIdColumn, routeNameColumn, addressColumn, customerNameColumn, customerNumberColumn, colorColumn } = req.body;
     if (!customerId) return res.status(400).json({ message: "customerId is required" });
 
     const customer = await Customer.findById(customerId);
@@ -160,6 +218,7 @@ router.post("/upload", protect, requireRole("admin"), upload.single("file"), asy
         ...(addressColumn    && { addressColumn }),
         ...(customerNameColumn   && { customerNameColumn }),
         ...(customerNumberColumn && { customerNumberColumn }),
+        ...(colorColumn          && { colorColumn }),
       },
     };
 
@@ -238,6 +297,7 @@ router.post("/upload-multiple", protect, requireRole("admin"), upload.array("fil
           ...(mapping.addressColumn    && { addressColumn:    mapping.addressColumn }),
           ...(mapping.customerNameColumn   && { customerNameColumn:   mapping.customerNameColumn }),
           ...(mapping.customerNumberColumn && { customerNumberColumn: mapping.customerNumberColumn }),
+          ...(mapping.colorColumn          && { colorColumn:          mapping.colorColumn }),
         },
       };
 
@@ -530,6 +590,7 @@ router.post("/scan", protect, requireRole("admin", "loader"), async (req, res) =
           routeId: "",
           routeName: entry.routeName,
           address: entry.address || "",
+          color: resolveColor(entry, customer),
           meta: batch.meta,
           extractionMode: "direct",
         });
@@ -561,6 +622,7 @@ router.post("/scan", protect, requireRole("admin", "loader"), async (req, res) =
         routeId: entry.routeId,
         routeName: masterEntry.routeName,
         address: entry.address || "",
+        color: resolveColor(entry, customer),
         meta: batch.meta,
         extractionMode: "route-lookup",
       });
@@ -609,6 +671,7 @@ router.post("/scan", protect, requireRole("admin", "loader"), async (req, res) =
           routeId: "",
           routeName: entry.routeName,
           address: entry.address || "",
+          color: resolveColor(entry, customer),
           meta: batch.meta,
           extractionMode: "direct",
         });
@@ -643,6 +706,7 @@ router.post("/scan", protect, requireRole("admin", "loader"), async (req, res) =
         routeId: entry.routeId,
         routeName: masterEntry.routeName,
         address: entry.address || "",
+        color: resolveColor(entry, customer),
         meta: batch.meta,
         extractionMode: "route-lookup",
       });

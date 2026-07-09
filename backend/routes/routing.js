@@ -37,6 +37,114 @@ function findColIdx(headers, colName) {
   return headers.findIndex((h) => String(h).trim().toLowerCase() === needle);
 }
 
+// ---------------------------------------------------------------------------
+// HELPERS: Color Master fill-color resolution
+// Some admins convey the "Colour" per row as the cell's BACKGROUND FILL
+// (highlighted Excel cells) rather than typing a hex/color-name value.
+// These helpers read that fill (theme color + tint, or a direct RGB) and
+// resolve it to a real hex string. Used only by the color-master upload route.
+// ---------------------------------------------------------------------------
+const THEME_COLOR_ORDER = ["lt1", "dk1", "lt2", "dk2", "accent1", "accent2", "accent3", "accent4", "accent5", "accent6", "hlink", "folHlink"];
+
+// Reads an Excel buffer WITH cell styles enabled, so fill colors are available.
+// Kept separate from readExcelHeaders (used everywhere else) to avoid the
+// extra parsing overhead on routes that don't need style info.
+function readExcelHeadersWithStyles(buffer) {
+  const workbook = XLSX.read(buffer, { type: "buffer", cellStyles: true });
+  let bestHeaders = [], bestHeaderRowIndex = -1, bestRows = [], bestSheet = null, bestMaxNonEmpty = 0;
+  for (const sheetName of workbook.SheetNames) {
+    const sheet = workbook.Sheets[sheetName];
+    const rows  = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+    for (let i = 0; i < Math.min(rows.length, 30); i++) {
+      const row      = rows[i];
+      const nonEmpty = row.filter((c) => String(c || "").trim().length > 0);
+      if (nonEmpty.length > bestMaxNonEmpty) {
+        bestMaxNonEmpty    = nonEmpty.length;
+        bestHeaderRowIndex = i;
+        bestHeaders        = row.map((c) => String(c || "").trim());
+        bestRows           = rows;
+        bestSheet          = sheet;
+      }
+    }
+  }
+  return { headers: bestHeaders, headerRowIndex: bestHeaderRowIndex, rows: bestRows, sheet: bestSheet, workbook };
+}
+
+function getThemePalette(workbook) {
+  try {
+    const scheme = workbook.Themes?.themeElements?.clrScheme || [];
+    const byName = {};
+    scheme.forEach((c) => { byName[c.name] = c.rgb; });
+    return THEME_COLOR_ORDER.map((name) => byName[name] || "FFFFFF");
+  } catch {
+    return THEME_COLOR_ORDER.map(() => "FFFFFF");
+  }
+}
+
+// Applies Excel's tint algorithm (HSL-space lightening/darkening) to a base hex color.
+function applyTint(hex, tint) {
+  if (!tint) return hex;
+  const r = parseInt(hex.slice(0, 2), 16) / 255;
+  const g = parseInt(hex.slice(2, 4), 16) / 255;
+  const b = parseInt(hex.slice(4, 6), 16) / 255;
+
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let h, s, l = (max + min) / 2;
+
+  if (max === min) { h = s = 0; }
+  else {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch (max) {
+      case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+      case g: h = (b - r) / d + 2; break;
+      default: h = (r - g) / d + 4; break;
+    }
+    h /= 6;
+  }
+
+  l = tint < 0 ? l * (1 + tint) : l * (1 - tint) + tint;
+
+  const hue2rgb = (p, q, t) => {
+    if (t < 0) t += 1;
+    if (t > 1) t -= 1;
+    if (t < 1 / 6) return p + (q - p) * 6 * t;
+    if (t < 1 / 2) return q;
+    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+    return p;
+  };
+
+  let r2, g2, b2;
+  if (s === 0) { r2 = g2 = b2 = l; }
+  else {
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    const p = 2 * l - q;
+    r2 = hue2rgb(p, q, h + 1 / 3);
+    g2 = hue2rgb(p, q, h);
+    b2 = hue2rgb(p, q, h - 1 / 3);
+  }
+
+  const toHex = (v) => Math.round(Math.max(0, Math.min(1, v)) * 255).toString(16).padStart(2, "0");
+  return `${toHex(r2)}${toHex(g2)}${toHex(b2)}`.toUpperCase();
+}
+
+// Resolves a worksheet cell's background fill to a "#RRGGBB" string, or "" if none.
+function resolveCellFillColor(workbook, cell) {
+  if (!cell || !cell.s || !cell.s.fgColor) return "";
+  const fg = cell.s.fgColor;
+  const tint = fg.tint || 0;
+  let baseHex = null;
+
+  if (fg.rgb && typeof fg.rgb === "string") {
+    baseHex = fg.rgb.length === 8 ? fg.rgb.slice(2) : fg.rgb; // strip ARGB alpha if present
+  } else if (typeof fg.theme === "number") {
+    baseHex = getThemePalette(workbook)[fg.theme] || "FFFFFF";
+  }
+
+  if (!baseHex) return "";
+  return `#${applyTint(baseHex, tint)}`;
+}
+
 function extractPincode(address) {
   const match = String(address || "").match(/\b(\d{6})\b/);
   return match ? match[1] : "";
@@ -93,10 +201,13 @@ router.get("/customers", protect, requireRole("admin"), async (req, res) => {
       displayName: c.displayName,
       hasAddressMaster: (c.routingMaster?.addressEntries?.length || 0) > 0,
       hasPincodeMaster: (c.routingMaster?.pincodeEntries?.length || 0) > 0,
+      hasColorMaster:   (c.colorMaster?.entries?.length || 0) > 0,
       addressFileName:  c.routingMaster?.addressFileName || null,
       pincodeFileName:  c.routingMaster?.pincodeFileName || null,
+      colorFileName:    c.colorMaster?.fileName || null,
       addressCount:     c.routingMaster?.addressEntries?.length || 0,
       pincodeCount:     c.routingMaster?.pincodeEntries?.length || 0,
+      colorCount:       c.colorMaster?.entries?.length || 0,
     }));
     res.json(result);
   } catch (err) {
@@ -112,6 +223,7 @@ router.get("/customers/:customerId/master", protect, requireRole("admin"), async
     if (!customer) return res.status(404).json({ message: "Customer not found" });
 
     const rm = customer.routingMaster || {};
+    const cm = customer.colorMaster || {};
     res.json({
       hasAddressMaster: (rm.addressEntries?.length || 0) > 0,
       hasPincodeMaster: (rm.pincodeEntries?.length || 0) > 0,
@@ -123,6 +235,11 @@ router.get("/customers/:customerId/master", protect, requireRole("admin"), async
       pincodeCount:     rm.pincodeEntries?.length || 0,
       pincodeMapping:   rm.pincodeMapping || null,
       pincodeUploadedAt: rm.pincodeUploadedAt || null,
+      hasColorMaster:   (cm.entries?.length || 0) > 0,
+      colorFileName:    cm.fileName || null,
+      colorCount:       cm.entries?.length || 0,
+      colorMapping:     cm.mapping || null,
+      colorUploadedAt:  cm.uploadedAt || null,
     });
   } catch (err) {
     console.error(err);
@@ -271,6 +388,100 @@ router.delete("/customers/:customerId/master/pincode", protect, requireRole("adm
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Server error clearing pincode master" });
+  }
+});
+
+// POST /api/routing/customers/:customerId/master/color — save/replace Color Master file
+// Maps Branch/Area/Pincode → Colour. At least one of branchColumn/areaColumn/pincodeColumn
+// is required alongside colourColumn.
+router.post(
+  "/customers/:customerId/master/color",
+  protect,
+  requireRole("admin"),
+  upload.single("file"),
+  async (req, res) => {
+    try {
+      const customer = await Customer.findById(req.params.customerId);
+      if (!customer) return res.status(404).json({ message: "Customer not found" });
+      if (!req.file) return res.status(400).json({ message: "No file uploaded" });
+
+      const { branchColumn, areaColumn, pincodeColumn, colourColumn } = req.body;
+      if (!colourColumn)
+        return res.status(400).json({ message: "colourColumn is required" });
+      if (!branchColumn && !areaColumn && !pincodeColumn)
+        return res.status(400).json({ message: "At least one of branchColumn, areaColumn, or pincodeColumn is required" });
+
+      const { headers, headerRowIndex, rows, sheet, workbook } = readExcelHeadersWithStyles(req.file.buffer);
+      const branchCol  = findColIdx(headers, branchColumn  || "");
+      const areaCol    = findColIdx(headers, areaColumn    || "");
+      const pincodeCol = findColIdx(headers, pincodeColumn || "");
+      const colourCol  = findColIdx(headers, colourColumn);
+
+      if (branchColumn  && branchCol  === -1) return res.status(400).json({ message: `Column "${branchColumn}" not found` });
+      if (areaColumn    && areaCol    === -1) return res.status(400).json({ message: `Column "${areaColumn}" not found` });
+      if (pincodeColumn && pincodeCol === -1) return res.status(400).json({ message: `Column "${pincodeColumn}" not found` });
+      if (colourCol === -1) return res.status(400).json({ message: `Column "${colourColumn}" not found` });
+
+      const entries = [];
+      let fillColorCount = 0;
+      for (let i = headerRowIndex + 1; i < rows.length; i++) {
+        const row     = rows[i];
+        const branch  = branchCol  !== -1 ? String(row[branchCol]  || "").trim() : "";
+        const area    = areaCol    !== -1 ? String(row[areaCol]    || "").trim() : "";
+        const pincode = pincodeCol !== -1 ? String(row[pincodeCol] || "").trim() : "";
+        let   colour  = String(row[colourCol] || "").trim();
+
+        // Fallback: some admins convey color via cell background fill instead of text.
+        if (!colour && sheet) {
+          const addr = XLSX.utils.encode_cell({ r: i, c: colourCol });
+          const fillColour = resolveCellFillColor(workbook, sheet[addr]);
+          if (fillColour) { colour = fillColour; fillColorCount++; }
+        }
+
+        if ((branch || area || pincode) && colour) entries.push({ branch, area, pincode, colour });
+      }
+      if (entries.length === 0)
+        return res.status(400).json({ message: "No valid rows found in this file. Make sure the Colour column has either text values (e.g. #4CAF50) or colored cell backgrounds." });
+
+      customer.colorMaster = customer.colorMaster || {};
+      customer.colorMaster.entries    = entries;
+      customer.colorMaster.mapping    = { branchColumn: branchColumn || "", areaColumn: areaColumn || "", pincodeColumn: pincodeColumn || "", colourColumn };
+      customer.colorMaster.fileName   = req.file.originalname;
+      customer.colorMaster.uploadedAt = new Date();
+      customer.colorMaster.uploadedBy = req.user.id;
+      customer.markModified("colorMaster");
+      await customer.save();
+
+      res.json({
+        message: fillColorCount > 0
+          ? `Color master saved for "${customer.displayName}" (${fillColorCount} of ${entries.length} colors read from cell backgrounds)`
+          : `Color master saved for "${customer.displayName}"`,
+        count: entries.length,
+        fileName: req.file.originalname,
+      });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ message: "Server error saving color master" });
+    }
+  }
+);
+
+// DELETE /api/routing/customers/:customerId/master/color — clear Color Master
+router.delete("/customers/:customerId/master/color", protect, requireRole("admin"), async (req, res) => {
+  try {
+    const customer = await Customer.findById(req.params.customerId);
+    if (!customer) return res.status(404).json({ message: "Customer not found" });
+    customer.colorMaster = customer.colorMaster || {};
+    customer.colorMaster.entries    = [];
+    customer.colorMaster.mapping    = null;
+    customer.colorMaster.fileName   = null;
+    customer.colorMaster.uploadedAt = null;
+    customer.markModified("colorMaster");
+    await customer.save();
+    res.json({ message: "Color master cleared" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error clearing color master" });
   }
 });
 

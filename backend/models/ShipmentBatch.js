@@ -34,6 +34,11 @@ const shipmentEntrySchema = new mongoose.Schema(
       trim: true,
       default: "",
     },
+    color: {
+      type: String,
+      trim: true,
+      default: "",
+    },
     isUndelivered: {
       type: Boolean,
       default: false,
