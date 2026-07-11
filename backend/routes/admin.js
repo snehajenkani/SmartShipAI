@@ -458,3 +458,53 @@ router.get("/customers/:customerId/loader-mapping", protect, requireRole("admin"
 });
 
 module.exports = router;
+// ---------------------------------------------------------------------------
+// PUBLIC EXTENSION LOOKUP — no auth required (used by Chrome Extension)
+// GET /api/admin/public/extension-lookup?query=BOATH
+// GET /api/admin/public/extension-lookup?query=BOATH&customerId=xxx
+// Case-insensitive substring match on searchText field
+// ---------------------------------------------------------------------------
+const ExtensionLookup = require("../models/ExtensionLookup");
+
+router.get("/public/extension-lookup", async (req, res) => {
+  try {
+    const { query, customerId } = req.query;
+    if (!query || String(query).trim().length === 0)
+      return res.status(400).json({ found: false, message: "query parameter is required" });
+
+    const needle = String(query).trim().toLowerCase();
+
+    // Build filter — optionally scope to one customer
+    const filter = customerId ? { customer: customerId } : {};
+    const lookups = await ExtensionLookup.find(filter).populate("customer", "displayName name");
+
+    // Search all entries for a substring match on searchText
+    let match = null;
+    let matchedCustomer = null;
+
+    for (const lookup of lookups) {
+      const entry = lookup.entries.find((e) =>
+        String(e.searchText || "").toLowerCase().includes(needle)
+      );
+      if (entry) {
+        match = entry;
+        matchedCustomer = lookup.customer;
+        break;
+      }
+    }
+
+    if (!match) {
+      return res.json({ found: false, message: "No route found for that code or location." });
+    }
+
+    return res.json({
+      found: true,
+      searchText: match.searchText,
+      routeName: match.routeName,
+      customerName: matchedCustomer?.displayName || "",
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ found: false, message: "Server error during lookup" });
+  }
+});
