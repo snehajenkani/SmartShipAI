@@ -88,6 +88,13 @@ const FileColumnCard = ({ fileName, headers, extractionMode, mapping, onChange, 
           onChange={(v) => onChange({ ...mapping, customerNumberColumn: v })}
           optional
         />
+        <ColSelect
+          label="No. of Packs column"
+          headers={headers}
+          value={mapping.noOfPacksColumn || ""}
+          onChange={(v) => onChange({ ...mapping, noOfPacksColumn: v })}
+          optional
+        />
       </div>
     </div>
   );
@@ -222,6 +229,7 @@ const ClientConfigPage = () => {
   const [loaderAddressCol, setLoaderAddressCol] = useState("");
   const [loaderCustomerNameCol, setLoaderCustomerNameCol] = useState("");
   const [loaderCustomerNumberCol, setLoaderCustomerNumberCol] = useState("");
+  const [loaderNoOfPacksCol, setLoaderNoOfPacksCol] = useState("");
   const [loaderStatus, setLoaderStatus] = useState(null);
   const [loaderBusy, setLoaderBusy] = useState(false);
 
@@ -404,7 +412,7 @@ const ClientConfigPage = () => {
     const file = e.target.files[0];
     setLoaderFile(file); setLoaderStatus(null); setLoaderHeaders([]);
     setLoaderTrackingIdCol(""); setLoaderRouteIdCol(""); setLoaderRouteNameCol(""); setLoaderAddressCol("");
-    setLoaderCustomerNameCol(""); setLoaderCustomerNumberCol("");
+    setLoaderCustomerNameCol(""); setLoaderCustomerNumberCol(""); setLoaderNoOfPacksCol("");
     if (!file || loaderCardMode !== "setup") return;
     try { setLoaderHeaders(await previewColumns(file)); }
     catch { setLoaderStatus({ type: "error", message: "Could not read columns from this file" }); }
@@ -427,6 +435,7 @@ const ClientConfigPage = () => {
       if (loaderAddressCol) mappingForm.append("addressColumn", loaderAddressCol);
       if (loaderCustomerNameCol) mappingForm.append("customerNameColumn", loaderCustomerNameCol);
       if (loaderCustomerNumberCol) mappingForm.append("customerNumberColumn", loaderCustomerNumberCol);
+      if (loaderNoOfPacksCol) mappingForm.append("noOfPacksColumn", loaderNoOfPacksCol);
       await api.post(`/admin/customers/${customerId}/loader-mapping`, mappingForm, {
         headers: { "Content-Type": "multipart/form-data" },
       });
@@ -469,6 +478,7 @@ const ClientConfigPage = () => {
     if (singleMapping.addressColumn)    fd.append("addressColumn",    singleMapping.addressColumn);
     if (singleMapping.customerNameColumn)   fd.append("customerNameColumn",   singleMapping.customerNameColumn);
     if (singleMapping.customerNumberColumn) fd.append("customerNumberColumn", singleMapping.customerNumberColumn);
+    if (singleMapping.noOfPacksColumn)      fd.append("noOfPacksColumn",      singleMapping.noOfPacksColumn);
     setSingleBusy(true); setSingleStatus(null);
     try {
       const res = await api.post("/scanner/upload", fd, { headers: { "Content-Type": "multipart/form-data" } });
@@ -793,6 +803,7 @@ const ClientConfigPage = () => {
                   <ColSelect label="Address column" headers={loaderHeaders} value={loaderAddressCol} onChange={setLoaderAddressCol} optional />
                   <ColSelect label="Customer Name column" headers={loaderHeaders} value={loaderCustomerNameCol} onChange={setLoaderCustomerNameCol} optional />
                   <ColSelect label="Customer Number column" headers={loaderHeaders} value={loaderCustomerNumberCol} onChange={setLoaderCustomerNumberCol} optional />
+                  <ColSelect label="No. of Packs column" headers={loaderHeaders} value={loaderNoOfPacksCol} onChange={setLoaderNoOfPacksCol} optional />
                 </div>
               )}
               <button type="submit" className="btn btn-primary" disabled={loaderBusy} style={{ alignSelf: "flex-start" }}>

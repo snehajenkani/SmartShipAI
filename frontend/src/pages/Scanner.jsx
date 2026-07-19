@@ -30,6 +30,10 @@ const Scanner = () => {
   const [scanResult, setScanResult] = useState(null);
   const [history, setHistory] = useState([]);
   const [downloading, setDownloading] = useState(false);
+  // Auto-locks to whichever customer the FIRST successful scan belongs to,
+  // so the progress counter tracks that customer's total instead of summing
+  // every active customer on the vehicle. Resets on page reload (per session).
+  const [lockedCustomer, setLockedCustomer] = useState(null);
 
   const inputRef = useRef(null);
   const { auth, logout } = useAuth();
@@ -106,6 +110,7 @@ const Scanner = () => {
         const reason = data.undeliveredReason || "Undelivered";
         setScanResult({ ...data, isUndelivered: true });
         speak(reason);
+        setLockedCustomer((prev) => prev || data.customerName || null);
         setHistory((prev) => [{
           timestamp,
           trackingId: data.trackingId || id,
@@ -123,9 +128,22 @@ const Scanner = () => {
       } else if (data.valid) {
         // ── Valid delivered package ──
         const routeName = data.routeName || "";
-        // speak route name; fall back to customer name so TTS is never silent
-        speak(routeName || data.customerName || "Valid Package");
+        const noOfPacks = data.noOfPacks || 1;
+        const scanCount = data.scanCount || 1;
+
+        if (data.alreadyScanned) {
+          // Duplicate scan — for multi-pack IDs, mention it's fully done
+          speak(noOfPacks > 1 ? `Already Scanned. All ${noOfPacks} packs done.` : "Already Scanned");
+        } else if (noOfPacks > 1) {
+          // Multi-pack tracking ID — announce route name + pack progress
+          speak(`${routeName || data.customerName || "Valid Package"}. Pack ${scanCount} of ${noOfPacks}.`);
+        } else {
+          // speak route name; fall back to customer name so TTS is never silent
+          speak(routeName || data.customerName || "Valid Package");
+        }
+
         setScanResult(data);
+        setLockedCustomer((prev) => prev || data.customerName || null);
         setHistory((prev) => [{
           timestamp,
           trackingId: data.trackingId || id,
@@ -137,6 +155,9 @@ const Scanner = () => {
           address: data.address || "",
           valid: true,
           isUndelivered: false,
+          alreadyScanned: !!data.alreadyScanned,
+          noOfPacks,
+          scanCount,
         }, ...prev]);
 
       } else {
@@ -209,6 +230,30 @@ const Scanner = () => {
   };
 
   const handleLogout = () => { logout(); navigate("/login"); };
+
+  // Total tracking IDs — once a customer is locked in (from the first scan),
+  // this is that customer's batch count. Before that, it's not shown at all,
+  // since we don't yet know which customer this session belongs to.
+  const totalTrackingIds = lockedCustomer && Array.isArray(batchInfo)
+    ? (batchInfo.find((b) => b.customerName === lockedCustomer)?.count || 0)
+    : 0;
+
+  // Scanned count scoped to the locked customer (falls back to counting
+  // everything if no lock has been set yet, which shouldn't normally happen
+  // since the history card only renders after the first scan).
+  const scannedCount = new Set(
+    history
+      .filter((i) => i.valid && !i.isUndelivered && (!lockedCustomer || i.customerName === lockedCustomer))
+      .map((i) => i.trackingId)
+  ).size;
+
+  // Only show a column if at least one row actually has data for it —
+  // avoids a table full of "—" placeholders for columns this customer
+  // never mapped.
+  const hasCustomerNameData   = history.some((i) => i.recipientName);
+  const hasCustomerNumberData = history.some((i) => i.recipientNumber);
+  const hasPacksData          = history.some((i) => i.noOfPacks > 1);
+  const hasAddressData        = history.some((i) => i.address);
 
   return (
     <div className="page">
@@ -284,6 +329,32 @@ const Scanner = () => {
                 </div>
               </div>
 
+            ) : scanResult.valid && scanResult.alreadyScanned ? (
+              /* ── Already scanned (duplicate — single-pack, or all packs done) ── */
+              <div className="card result-card" style={{
+                border: "2px solid #6b7280",
+                background: "#f3f4f6",
+              }}>
+                <div style={{
+                  fontSize: "13px", fontWeight: 700, color: "#4b5563",
+                  letterSpacing: "0.5px", textTransform: "uppercase", marginBottom: "6px",
+                }}>
+                  ⚠️ Already Scanned
+                  {scanResult.noOfPacks > 1 && ` — All ${scanResult.noOfPacks} Packs Done`}
+                </div>
+                <div style={{ fontSize: "28px", fontWeight: 800, color: "#374151", marginBottom: "8px" }}>
+                  {scanResult.routeName}
+                </div>
+                {scanResult.customerName && (
+                  <div style={{ fontSize: "13px", fontWeight: 600, color: "#4b5563", marginBottom: "6px" }}>
+                    {scanResult.customerName}
+                  </div>
+                )}
+                <div className="result-details">
+                  <span>Tracking ID: {scanResult.trackingId}</span>
+                </div>
+              </div>
+
             ) : scanResult.valid ? (
               /* ── Valid delivered result ── */
               <div
@@ -294,6 +365,17 @@ const Scanner = () => {
                     : undefined
                 }
               >
+                {scanResult.noOfPacks > 1 && (
+                  <div style={{
+                    display: "inline-block", fontSize: "13px", fontWeight: 700,
+                    color: scanResult.color ? getContrastText(scanResult.color) : "var(--brand-navy)",
+                    background: scanResult.color ? "rgba(255,255,255,0.35)" : "var(--color-primary-light)",
+                    borderRadius: "20px", padding: "3px 12px", marginBottom: "8px",
+                  }}>
+                    📦 Pack {scanResult.scanCount} of {scanResult.noOfPacks}
+                    {scanResult.packsComplete ? " — Complete" : ""}
+                  </div>
+                )}
                 <div
                   className="result-hero"
                   style={scanResult.color ? { color: getContrastText(scanResult.color) } : undefined}
@@ -352,10 +434,13 @@ const Scanner = () => {
               background: "var(--brand-teal)", borderRadius: "10px", color: "white",
             }}>
               <div style={{ fontSize: "13px", fontWeight: 600, letterSpacing: "1px", textTransform: "uppercase", opacity: 0.85 }}>
-                Total Shipments Scanned
+                Shipments Scanned{lockedCustomer ? ` — ${lockedCustomer}` : ""}
               </div>
               <div style={{ fontSize: "52px", fontWeight: 800, lineHeight: 1.1 }}>
-                {new Set(history.filter(i => i.valid && !i.isUndelivered).map(i => i.trackingId)).size}
+                {scannedCount}
+                {totalTrackingIds > 0 && (
+                  <span style={{ fontSize: "28px", opacity: 0.75 }}> / {totalTrackingIds}</span>
+                )}
               </div>
               {history.some(i => i.isUndelivered) && (
                 <div style={{ fontSize: "13px", opacity: 0.85, marginTop: 4 }}>
@@ -370,10 +455,11 @@ const Scanner = () => {
                   <th>Time</th>
                   <th>Tracking ID</th>
                   <th>Customer</th>
-                  <th>Customer Name</th>
-                  <th>Customer Number</th>
+                  {hasCustomerNameData && <th>Customer Name</th>}
+                  {hasCustomerNumberData && <th>Customer Number</th>}
                   <th>Result</th>
-                  <th>Address</th>
+                  {hasPacksData && <th>Packs</th>}
+                  {hasAddressData && <th>Address</th>}
                 </tr>
               </thead>
               <tbody>
@@ -384,21 +470,33 @@ const Scanner = () => {
                     style={item.isUndelivered ? {
                       background: "#fffbeb",
                       borderLeft: "3px solid #f59e0b",
+                    } : item.alreadyScanned ? {
+                      background: "#f3f4f6",
+                      borderLeft: "3px solid #6b7280",
                     } : {}}
                   >
                     <td>{item.timestamp}</td>
                     <td>{item.trackingId}</td>
                     <td>{item.customerName || "—"}</td>
-                    <td>{item.recipientName || "—"}</td>
-                    <td>{item.recipientNumber || "—"}</td>
+                    {hasCustomerNameData && <td>{item.recipientName || "—"}</td>}
+                    {hasCustomerNumberData && <td>{item.recipientNumber || "—"}</td>}
                     <td>
                       {item.isUndelivered
                         ? <span style={{ color: "#b45309", fontWeight: 600 }}>⚠️ {item.undeliveredReason || "Undelivered"}</span>
-                        : item.valid
-                          ? item.routeName
-                          : item.message}
+                        : item.alreadyScanned
+                          ? <span style={{ color: "#4b5563", fontWeight: 600 }}>⚠️ Already Scanned</span>
+                          : item.valid
+                            ? item.routeName
+                            : item.message}
                     </td>
-                    <td>{item.address || ""}</td>
+                    {hasPacksData && (
+                      <td>
+                        {item.valid && !item.isUndelivered && item.noOfPacks > 1
+                          ? `${item.scanCount} / ${item.noOfPacks}`
+                          : ""}
+                      </td>
+                    )}
+                    {hasAddressData && <td>{item.address || ""}</td>}
                   </tr>
                 ))}
               </tbody>
