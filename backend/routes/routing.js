@@ -537,6 +537,7 @@ router.post(
         const customerName   = rCustNameCol   !== -1 ? String(row[rCustNameCol]   || "").trim() : "";
         const customerNumber = rCustNumberCol !== -1 ? String(row[rCustNumberCol] || "").trim() : "";
         const fullAddress    = String(row[rAddressCol]    || "").trim();
+        const pincode        = extractPincode(fullAddress);
 
         if (!awb && !fullAddress) continue;
 
@@ -552,7 +553,6 @@ router.post(
         }
 
         if (matchMethod === "unmatched") {
-          const pincode = extractPincode(fullAddress);
           if (pincode && pincodeMap.has(pincode)) {
             routeName   = pincodeMap.get(pincode);
             matchMethod = "pincode";
@@ -562,7 +562,7 @@ router.post(
         if (matchMethod !== "unmatched") matchedCount++;
         else unmatchedCount++;
 
-        results.push({ awb, customerName, customerNumber, address: fullAddress, routeName, matchMethod });
+        results.push({ awb, customerName, customerNumber, address: fullAddress, pincode, routeName, matchMethod });
       }
 
       if (results.length === 0)
@@ -619,6 +619,7 @@ router.get("/download/:jobId", protect, requireRole("admin"), async (req, res) =
       "Customer Name":   r.customerName,
       "Customer Number": r.customerNumber,
       "Address":         r.address,
+      "Pincode":         r.pincode || "",
       "Route Name":      r.routeName,
       "Match Method":    r.matchMethod === "address" ? "Address Match"
                        : r.matchMethod === "pincode" ? "Pincode Match"
@@ -627,7 +628,7 @@ router.get("/download/:jobId", protect, requireRole("admin"), async (req, res) =
 
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.json_to_sheet(rows);
-    ws["!cols"] = [{ wch: 20 }, { wch: 22 }, { wch: 18 }, { wch: 40 }, { wch: 24 }, { wch: 16 }];
+    ws["!cols"] = [{ wch: 20 }, { wch: 22 }, { wch: 18 }, { wch: 40 }, { wch: 12 }, { wch: 24 }, { wch: 16 }];
     XLSX.utils.book_append_sheet(wb, ws, "Routing Results");
 
     const buffer   = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });

@@ -122,6 +122,16 @@ function parseEntriesFromBuffer(buffer, customer) {
   const customerNameColIdx = findColIdx(headers, customer.loaderMapping?.customerNameColumn);
   const customerNumberColIdx = findColIdx(headers, customer.loaderMapping?.customerNumberColumn);
   const colorColIdx = findColIdx(headers, customer.loaderMapping?.colorColumn);
+  const noOfPacksColIdx = findColIdx(headers, customer.loaderMapping?.noOfPacksColumn);
+
+  // Parses the "No. of Packs" cell to a positive integer, defaulting to 1
+  // whenever the column isn't mapped or the cell is blank/invalid.
+  const parseNoOfPacks = (row) => {
+    if (noOfPacksColIdx === -1) return 1;
+    const raw = String(row[noOfPacksColIdx] || "").trim();
+    const n = parseInt(raw, 10);
+    return Number.isFinite(n) && n > 0 ? n : 1;
+  };
 
   if (customer.extractionMode === "route-lookup") {
     const routeIdCol = findColIdx(headers, customer.loaderMapping.routeIdColumn);
@@ -135,7 +145,8 @@ function parseEntriesFromBuffer(buffer, customer) {
       const customerName = customerNameColIdx !== -1 ? String(row[customerNameColIdx] || "").trim() : "";
       const customerNumber = customerNumberColIdx !== -1 ? String(row[customerNumberColIdx] || "").trim() : "";
       const color = colorColIdx !== -1 ? String(row[colorColIdx] || "").trim() : "";
-      if (trackingId && routeId) entries.push({ trackingId, routeId, routeName: "", address, customerName, customerNumber, color });
+      const noOfPacks = parseNoOfPacks(row);
+      if (trackingId && routeId) entries.push({ trackingId, routeId, routeName: "", address, customerName, customerNumber, color, noOfPacks, scanCount: 0 });
     }
   } else {
     const routeNameCol = findColIdx(headers, customer.loaderMapping.routeNameColumn);
@@ -149,11 +160,43 @@ function parseEntriesFromBuffer(buffer, customer) {
       const customerName = customerNameColIdx !== -1 ? String(row[customerNameColIdx] || "").trim() : "";
       const customerNumber = customerNumberColIdx !== -1 ? String(row[customerNumberColIdx] || "").trim() : "";
       const color = colorColIdx !== -1 ? String(row[colorColIdx] || "").trim() : "";
-      if (trackingId && routeName) entries.push({ trackingId, routeId: "", routeName, address, customerName, customerNumber, color });
+      const noOfPacks = parseNoOfPacks(row);
+      if (trackingId && routeName) entries.push({ trackingId, routeId: "", routeName, address, customerName, customerNumber, color, noOfPacks, scanCount: 0 });
     }
   }
 
   return { entries, meta };
+}
+
+// ---------------------------------------------------------------------------
+// HELPER: registerScan — increments an entry's scanCount and figures out
+// whether this scan is a duplicate ("Already Scanned") or, for multi-pack
+// tracking IDs, how far through the packs this tracking ID is.
+// Mutates `entry` in place; caller is responsible for markModified + save.
+// ---------------------------------------------------------------------------
+function registerScan(entry) {
+  const noOfPacks = entry.noOfPacks && entry.noOfPacks > 0 ? entry.noOfPacks : 1;
+  const previousCount = entry.scanCount || 0;
+
+  // Once scanCount reaches noOfPacks, the tracking ID is fully scanned —
+  // any further scan is a duplicate and must NOT push the count past
+  // noOfPacks (no "3/2"). It's flagged alreadyScanned instead, whether
+  // there's 1 pack or several.
+  const alreadyScanned = previousCount >= noOfPacks;
+
+  if (!alreadyScanned) {
+    entry.scanCount = previousCount + 1;
+  }
+  // else: leave entry.scanCount untouched — stays capped at noOfPacks
+
+  const packsComplete = entry.scanCount >= noOfPacks;
+
+  return {
+    noOfPacks,
+    scanCount: entry.scanCount,
+    alreadyScanned,
+    packsComplete,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -197,7 +240,7 @@ router.get("/customers", protect, requireRole("admin", "loader"), async (req, re
 router.post("/upload", protect, requireRole("admin"), upload.single("file"), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ message: "No file uploaded" });
-    const { customerId, trackingIdColumn, routeIdColumn, routeNameColumn, addressColumn, customerNameColumn, customerNumberColumn, colorColumn } = req.body;
+    const { customerId, trackingIdColumn, routeIdColumn, routeNameColumn, addressColumn, customerNameColumn, customerNumberColumn, colorColumn, noOfPacksColumn } = req.body;
     if (!customerId) return res.status(400).json({ message: "customerId is required" });
 
     const customer = await Customer.findById(customerId);
@@ -219,6 +262,7 @@ router.post("/upload", protect, requireRole("admin"), upload.single("file"), asy
         ...(customerNameColumn   && { customerNameColumn }),
         ...(customerNumberColumn && { customerNumberColumn }),
         ...(colorColumn          && { colorColumn }),
+        ...(noOfPacksColumn      && { noOfPacksColumn }),
       },
     };
 
@@ -298,6 +342,7 @@ router.post("/upload-multiple", protect, requireRole("admin"), upload.array("fil
           ...(mapping.customerNameColumn   && { customerNameColumn:   mapping.customerNameColumn }),
           ...(mapping.customerNumberColumn && { customerNumberColumn: mapping.customerNumberColumn }),
           ...(mapping.colorColumn          && { colorColumn:          mapping.colorColumn }),
+          ...(mapping.noOfPacksColumn      && { noOfPacksColumn:      mapping.noOfPacksColumn }),
         },
       };
 
@@ -579,6 +624,11 @@ router.post("/scan", protect, requireRole("admin", "loader"), async (req, res) =
         });
       }
 
+      // ── Scan progress (already-scanned / multi-pack counter) ──
+      const scanProgress = registerScan(entry);
+      batch.markModified("entries");
+      await batch.save();
+
       if (customer.extractionMode === "direct") {
         return res.json({
           valid: true,
@@ -593,6 +643,7 @@ router.post("/scan", protect, requireRole("admin", "loader"), async (req, res) =
           color: resolveColor(entry, customer),
           meta: batch.meta,
           extractionMode: "direct",
+          ...scanProgress,
         });
       }
 
@@ -625,6 +676,7 @@ router.post("/scan", protect, requireRole("admin", "loader"), async (req, res) =
         color: resolveColor(entry, customer),
         meta: batch.meta,
         extractionMode: "route-lookup",
+        ...scanProgress,
       });
     }
 
@@ -660,6 +712,11 @@ router.post("/scan", protect, requireRole("admin", "loader"), async (req, res) =
         });
       }
 
+      // ── Scan progress (already-scanned / multi-pack counter) ──
+      const scanProgress = registerScan(entry);
+      batch.markModified("entries");
+      await batch.save();
+
       if (customer.extractionMode === "direct") {
         return res.json({
           valid: true,
@@ -674,6 +731,7 @@ router.post("/scan", protect, requireRole("admin", "loader"), async (req, res) =
           color: resolveColor(entry, customer),
           meta: batch.meta,
           extractionMode: "direct",
+          ...scanProgress,
         });
       }
 
@@ -709,6 +767,7 @@ router.post("/scan", protect, requireRole("admin", "loader"), async (req, res) =
         color: resolveColor(entry, customer),
         meta: batch.meta,
         extractionMode: "route-lookup",
+        ...scanProgress,
       });
     }
 

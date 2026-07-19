@@ -39,6 +39,16 @@ const shipmentEntrySchema = new mongoose.Schema(
       trim: true,
       default: "",
     },
+    noOfPacks: {
+      type: Number,
+      default: 1,
+      min: 1,
+    },
+    scanCount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
     isUndelivered: {
       type: Boolean,
       default: false,

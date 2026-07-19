@@ -87,6 +87,7 @@ router.get("/customers", protect, requireRole("admin"), async (req, res) => {
           addressColumn: c.loaderMapping.addressColumn || "",
           customerNameColumn: c.loaderMapping.customerNameColumn || "",
           customerNumberColumn: c.loaderMapping.customerNumberColumn || "",
+          noOfPacksColumn: c.loaderMapping.noOfPacksColumn || "",
           sampleFileName: c.loaderMapping.sampleFileName,
           setAt: c.loaderMapping.setAt,
         } : null,
@@ -368,7 +369,7 @@ router.post("/customers/:customerId/loader-mapping", protect, requireRole("admin
       return res.status(400).json({ message: "No sample file uploaded" });
 
     const { headers } = readExcelHeaders(req.file.buffer);
-    const { trackingIdColumn, routeIdColumn, routeNameColumn, addressColumn, colorColumn, customerNameColumn, customerNumberColumn } = req.body;
+    const { trackingIdColumn, routeIdColumn, routeNameColumn, addressColumn, colorColumn, customerNameColumn, customerNumberColumn, noOfPacksColumn } = req.body;
 
     if (!trackingIdColumn)
       return res.status(400).json({ message: "trackingIdColumn is required" });
@@ -387,6 +388,7 @@ router.post("/customers/:customerId/loader-mapping", protect, requireRole("admin
         colorColumn: colorColumn || "",
         customerNameColumn: customerNameColumn || "",
         customerNumberColumn: customerNumberColumn || "",
+        noOfPacksColumn: noOfPacksColumn || "",
         sampleFileName: req.file.originalname,
         setAt: new Date(),
       };
@@ -404,6 +406,7 @@ router.post("/customers/:customerId/loader-mapping", protect, requireRole("admin
         colorColumn: colorColumn || "",
         customerNameColumn: customerNameColumn || "",
         customerNumberColumn: customerNumberColumn || "",
+        noOfPacksColumn: noOfPacksColumn || "",
         sampleFileName: req.file.originalname,
         setAt: new Date(),
       };
@@ -420,6 +423,7 @@ router.post("/customers/:customerId/loader-mapping", protect, requireRole("admin
       colorColumn: customer.loaderMapping.colorColumn,
       customerNameColumn: customer.loaderMapping.customerNameColumn,
       customerNumberColumn: customer.loaderMapping.customerNumberColumn,
+      noOfPacksColumn: customer.loaderMapping.noOfPacksColumn,
       extractionMode: customer.extractionMode,
     });
   } catch (err) {
@@ -448,6 +452,7 @@ router.get("/customers/:customerId/loader-mapping", protect, requireRole("admin"
       colorColumn: customer.loaderMapping.colorColumn || "",
       customerNameColumn: customer.loaderMapping.customerNameColumn || "",
       customerNumberColumn: customer.loaderMapping.customerNumberColumn || "",
+      noOfPacksColumn: customer.loaderMapping.noOfPacksColumn || "",
       sampleFileName: customer.loaderMapping.sampleFileName,
       setAt: customer.loaderMapping.setAt,
     });

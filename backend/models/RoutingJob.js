@@ -6,6 +6,7 @@ const routingResultSchema = new mongoose.Schema(
     customerName:   { type: String, trim: true },
     customerNumber: { type: String, trim: true },
     address:        { type: String, trim: true },
+    pincode:        { type: String, trim: true, default: "" },
     routeName:      { type: String, trim: true, default: "CHECK THIS" },
     matchMethod:    { type: String, enum: ["address", "pincode", "unmatched"], default: "unmatched" },
   },

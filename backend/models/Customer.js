@@ -36,6 +36,7 @@ const customerSchema = new mongoose.Schema(
       addressColumn:    { type: String, trim: true }, // NEW
       customerNameColumn:   { type: String, trim: true }, // recipient name, per-row
       customerNumberColumn: { type: String, trim: true }, // recipient number, per-row
+      noOfPacksColumn:  { type: String, trim: true, default: "" }, // NEW — packs per tracking ID
       sampleFileName:   { type: String },
       setAt:            { type: Date },
     },
